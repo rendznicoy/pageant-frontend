@@ -1,3 +1,14 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+body {
+  @apply font-sans;
+}
+
+@layer base {
+  * {
+    font-family: Arial, sans-serif;
+  }
+}
+
+button {
+  cursor: pointer;
+}
