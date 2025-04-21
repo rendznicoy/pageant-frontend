@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import axiosClient from "./axios";
 import DefaultLayout from "./components/DefaultLayout.vue";
 import NotFound from "./pages/NotFound.vue";
 
@@ -34,62 +35,65 @@ const routes = [
     component: DefaultLayout,
     children: [
       {
-        path: "admin/dashboard",
+        path: "/admin/dashboard",
         name: "AdminDashboard",
         component: DashboardAdmin,
+        meta: { requiresAuth: true },
       },
       {
-        path: "tabulator/dashboard",
+        path: "/tabulator/dashboard",
         name: "TabulatorDashboard",
         component: DashboardTabulator,
+        meta: { requiresAuth: true },
       },
       {
-        path: "judge/dashboard",
+        path: "/judge/dashboard",
         name: "JudgeDashboard",
         component: DashboardJudge,
+        meta: { requiresAuth: true },
       },
       {
-        path: "images",
+        path: "/images",
         name: "Images",
         component: Images,
       },
       {
-        path: "users",
+        path: "/users",
         name: "Users",
         component: Users,
       },
       {
-        path: "events",
+        path: "/",
         name: "Events",
         component: Events,
       },
       {
-        path: "categories",
+        path: "/categories",
         name: "Categories",
         component: Categories,
       },
       {
-        path: "candidates",
+        path: "/candidates",
         name: "Candidates",
         component: Candidates,
       },
       {
-        path: "judges",
+        path: "/judges",
         name: "Judges",
         component: Judges,
       },
       {
-        path: "scores",
+        path: "/scores",
         name: "Scores",
         component: Scores,
       },
       {
-        path: "reports",
+        path: "/reports",
         name: "Reports",
         component: Reports,
       },
       {
-        path: "forgot",
+        path: "/forgot",
         name: "Forgot",
         component: Forgot,
       },
@@ -129,6 +133,20 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes,
+});
+
+router.beforeEach(async (to, from, next) => {
+  if (to.meta.requiresAuth) {
+    try {
+      // Check if authenticated by making a request to a protected endpoint
+      await axiosClient.get("/api/v1/user"); // or whatever endpoint checks authentication
+      next();
+    } catch (error) {
+      next("/login/admin");
+    }
+  } else {
+    next();
+  }
 });
 
 export default router;
