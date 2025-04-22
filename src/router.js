@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import axiosClient from "./axios";
 import DefaultLayout from "./components/DefaultLayout.vue";
 import NotFound from "./pages/NotFound.vue";
+import Confirmation from "./pages/Confirmation.vue";
 
 // Dashboard Pages
 import DashboardAdmin from "./pages/Dashboard/DashboardAdmin.vue";
@@ -96,6 +97,13 @@ const routes = [
         path: "/forgot",
         name: "Forgot",
         component: Forgot,
+      },
+      {
+        path: "/confirmation",
+        name: "Confirmation",
+        component: Confirmation,
+        // Adding meta property to indicate this route expects POST data
+        meta: { expectsFormData: true },
       },
     ],
   },
