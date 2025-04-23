@@ -1,29 +1,56 @@
 <script setup>
-import { ref, onMounted, watch } from "vue";
+import { ref, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import axiosClient from "../../axios";
 import GuestLayout from "../../components/GuestLayout.vue";
 
 const router = useRouter();
+const pinInputs = Array.from({ length: 6 }, () => ref(""));
+const inputRefs = ref([]);
 
-const data = ref({
-  pin_code: "",
-});
+function handleInput(index, event) {
+  const value = event.target.value.toUpperCase();
+  pinInputs[index].value = value.slice(0, 1); // only allow 1 char, uppercase
 
-function handleLogin() {
+  // Move to next box if filled
+  if (value && index < 5) {
+    inputRefs.value[index + 1]?.focus();
+  }
+}
+
+function handleKeydown(index, event) {
+  if (event.key === "Backspace" && !pinInputs[index].value && index > 0) {
+    inputRefs.value[index - 1]?.focus();
+  }
+}
+
+function handlePaste(event) {
+  const paste = event.clipboardData.getData("text").toUpperCase().slice(0, 6);
+  [...paste].forEach((char, idx) => {
+    pinInputs[idx].value = char;
+  });
+
+  nextTick(() => {
+    const next = paste.length >= 6 ? 5 : paste.length;
+    inputRefs.value[next]?.focus();
+  });
+
+  event.preventDefault();
+}
+
+function handleJudgeLogin() {
+  const pin_code = pinInputs.map((ref) => ref.value).join("");
+
   axiosClient.get("/api/csrf-cookie").then(() => {
     axiosClient
-      .post("/api/v1/login", {
-        pin_code: data.value.pin_code,
-        remember: data.value.remember,
-      })
+      .post("/api/v1/login/judge", { pin_code })
       .then((response) => {
         if (response.status === 200) {
           router.push("/judge/dashboard");
         }
       })
       .catch((error) => {
-        console.error("Login error:", error);
+        console.error("Judge Login error:", error);
       });
   });
 }
@@ -31,28 +58,32 @@ function handleLogin() {
 
 <template>
   <GuestLayout>
-    <form @submit.prevent="handleLogin" class="mt-16 space-y-8">
-      <div>
-        <input
-          type="text"
-          id="pin_code"
-          name="pin_code"
-          placeholder="Judge PIN Code"
-          class="shadow-sm block w-full sm:text-sm border border-gray-400 rounded-sm h-8 focus:outline-green-400 pl-4 py-2 px-3"
-          required
-          v-model="data.pin_code"
-        />
-      </div>
-      <div>
+    <div class="bg-white p-12 rounded shadow-lg w-full max-w-md">
+      <h2 class="text-xl font-bold text-center mb-12">
+        Judge Login – Enter Your PIN
+      </h2>
+      <form @submit.prevent="handleJudgeLogin">
+        <div class="flex justify-between gap-4 mb-8" @paste="handlePaste">
+          <input
+            v-for="(input, index) in pinInputs"
+            :key="index"
+            type="text"
+            maxlength="1"
+            class="w-10 h-12 text-center border border-gray-400 rounded text-xl uppercase focus:outline-green-400"
+            v-model="pinInputs[index].value"
+            @input="handleInput(index, $event)"
+            @keydown="handleKeydown(index, $event)"
+            ref="inputRefs"
+          />
+        </div>
         <button
           type="submit"
-          class="w-full flex justify-center py-2 px-8 border border-transparent rounded-sm shadow-sm text-sm font-bold text-gray-900 bg-yellow-300 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-600"
+          class="w-full bg-yellow-300 text-gray-900 font-bold py-2 rounded hover:bg-gray-400"
         >
-          Log in as Judge
+          Log In
         </button>
-      </div>
-
-      <div class="mt-3 text-center text-sm">
+      </form>
+      <div class="mt-6 text-center text-sm">
         <a
           href="/login/admin"
           class="font-medium text-green-700 hover:text-orange-600 hover:underline"
@@ -60,7 +91,7 @@ function handleLogin() {
           Are you an Admin or Tabulator?
         </a>
       </div>
-    </form>
+    </div>
   </GuestLayout>
 </template>
 

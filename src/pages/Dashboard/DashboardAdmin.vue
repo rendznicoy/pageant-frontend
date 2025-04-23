@@ -1,4 +1,5 @@
 <script setup>
+import TopBar from "../../components/TopBar.vue";
 import { useRouter } from "vue-router";
 import axiosClient from "../../axios";
 
@@ -19,7 +20,7 @@ function logout() {
 }
 </script>
 <template>
-  <div class="min-h-screen bg-gray-100">
+  <TopBar>
     <nav class="bg-white shadow-sm">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex justify-between h-16">
@@ -48,5 +49,7 @@ function logout() {
         </div>
       </div>
     </main>
-  </div>
+  </TopBar>
 </template>
+
+<style scoped></style>

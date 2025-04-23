@@ -1,5 +1,7 @@
 <template>
-  <div></div>
+  <div>
+    <h1>Judge Dashboard, Hi!</h1>
+  </div>
 </template>
 
 <script>

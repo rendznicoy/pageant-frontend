@@ -43,11 +43,28 @@ function redirectToJudgeLogin() {
   router.push("/login/judge");
 }
 
+// Add a function to handle Google login
+function handleGoogleLogin() {
+  window.location.href =
+    axiosClient.defaults.baseURL + "/api/v1/auth/google/redirect";
+}
+
+const loginError = ref("");
+
 onMounted(() => {
   const remembered = localStorage.getItem("remembered");
   if (remembered) {
     data.value.username = remembered;
     data.value.remember = true;
+  }
+
+  const urlParams = new URLSearchParams(window.location.search);
+  const error = urlParams.get("error");
+
+  if (error === "only_vsu_emails") {
+    loginError.value = "Only @vsu.edu.ph email addresses are allowed.";
+  } else if (error === "google_auth_failed") {
+    loginError.value = "Google authentication failed. Please try again.";
   }
 });
 
@@ -64,6 +81,13 @@ watch(
 </script>
 <template>
   <GuestLayout>
+    <div
+      v-if="loginError"
+      class="bg-red-200 border border-red-500 text-red-800 px-4 py-3 rounded relative mt-4"
+      role="alert"
+    >
+      <span class="block sm:inline">{{ loginError }}</span>
+    </div>
     <form @submit.prevent="handleLogin" class="mt-8 space-y-8">
       <div>
         <div class="mt-2">
@@ -160,14 +184,10 @@ watch(
     </div>
     <div class="mt-2">
       <button
+        @click="handleGoogleLogin"
         class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-gray-900 bg-yellow-300 hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-600"
       >
         <img class="h-5 w-5 mr-2" src="/google24bg.png" alt="Google Logo" />
-        <path
-          fill-rule="evenodd"
-          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.657 7.53a1 1 0 011.686-1.069l2.832 2.832a1 1 0 01-1.414 1.414l-2.832-2.832a1 1 0 01-1.686 1.069V11a1 1 0 11-2 0V7.53a1 1 0 01.343-.73z"
-          clip-rule="evenodd"
-        />
         @vsu.edu.ph
       </button>
     </div>
