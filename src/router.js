@@ -3,6 +3,10 @@ import axiosClient from "./axios";
 import DefaultLayout from "./components/DefaultLayout.vue";
 import NotFound from "./pages/NotFound.vue";
 import Confirmation from "./pages/Confirmation.vue";
+import Logs from "./pages/Logs.vue";
+import Notification from "./pages/Notification.vue";
+import Profile from "./pages/Profile.vue";
+import Preferences from "./pages/Preferences.vue";
 
 // Dashboard Pages
 import DashboardAdmin from "./pages/Dashboard/DashboardAdmin.vue";
@@ -64,7 +68,7 @@ const routes = [
         component: Users,
       },
       {
-        path: "/",
+        path: "/events",
         name: "Events",
         component: Events,
       },
@@ -104,6 +108,26 @@ const routes = [
         component: Confirmation,
         // Adding meta property to indicate this route expects POST data
         meta: { expectsFormData: true },
+      },
+      {
+        path: "/logs",
+        name: "Logs",
+        component: Logs,
+      },
+      {
+        path: "/notification",
+        name: "Notification",
+        component: Notification,
+      },
+      {
+        path: "/profile",
+        name: "Profile",
+        component: Profile,
+      },
+      {
+        path: "/preferences",
+        name: "Preferences",
+        component: Preferences,
       },
     ],
   },

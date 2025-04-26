@@ -1,7 +1,5 @@
 <template>
-  <div>
-    <h1>This is the Reports Page</h1>
-  </div>
+  <div>This is the Notifications page.</div>
 </template>
 
 <script>
