@@ -1,21 +1,25 @@
 <script setup>
 import { onMounted, ref } from "vue";
-import axiosClient from "../axios";
-import Menubar from "./buttons/Menubar.vue";
-import Notifications from "./buttons/Notifications.vue";
-import { useSidebarStore } from "../sidebar";
+import { useUserStore } from "@/stores/user";
+import Menubar from "./Menubar.vue";
+import Notifications from "../shared/Notifications.vue";
+import { useSidebarStore } from "../../sidebar";
 
-const user = ref(null);
 const sidebar = useSidebarStore();
+const userStore = useUserStore();
+const emit = defineEmits(["refresh-dashboard"]);
 
 const toggleSidebar = () => {
   sidebar.toggle();
 };
 
+const handleRefreshDashboard = () => {
+  console.log("Navbar forwarding refresh-dashboard");
+  emit("refresh-dashboard");
+};
+
 onMounted(() => {
-  axiosClient.get("/api/v1/user").then((response) => {
-    user.value = response.data;
-  });
+  userStore.fetchUser();
 });
 </script>
 
@@ -59,7 +63,7 @@ onMounted(() => {
       </div>
 
       <!-- Right side -->
-      <div class="flex items-center space-x-4" v-if="user">
+      <div class="flex items-center space-x-4" v-if="userStore.user">
         <!-- Notifications -->
         <Notifications />
         <!-- Chat / Messages - DISABLED -->
@@ -70,8 +74,11 @@ onMounted(() => {
         </div>
 
         <!-- Profile Menu -->
-        <div v-if="user">
-          <Menubar :user="user" />
+        <div v-if="userStore.user">
+          <Menubar
+            :user="userStore.user"
+            @refresh-dashboard="handleRefreshDashboard"
+          />
         </div>
       </div>
     </div>

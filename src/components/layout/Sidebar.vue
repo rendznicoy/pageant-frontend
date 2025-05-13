@@ -1,35 +1,63 @@
 <script setup>
-import { computed, ref, onMounted } from "vue";
+import { computed, ref, onMounted, defineEmits, defineProps } from "vue";
 import { useSidebarStore } from "../../sidebar";
-import axiosClient from "../../axios";
+import { useEventStore } from "@/stores/event";
+import { useRouter } from "vue-router";
 
+const router = useRouter();
 const sidebar = useSidebarStore();
-const events = ref([]);
-const wrapperClass = computed(() => {
-  return sidebar.isOpen ? "translate-x-0" : "-translate-x-full";
+const eventStore = useEventStore();
+
+const emit = defineEmits(["refresh-dashboard"]);
+
+// Define props
+const props = defineProps({
+  role: {
+    type: String,
+    default: "admin", // Default to admin if not specified
+    validator: (value) => ["admin", "tabulator"].includes(value),
+  },
 });
 
-onMounted(() => {
-  axiosClient.get("/api/v1/events").then((response) => {
-    events.value = response.data.sort((a, b) => {
-      // First sort by status
-      const order = { active: 0, inactive: 1, completed: 2 };
-      const statusComparison = order[a.status] - order[b.status];
+const wrapperClass = computed(() =>
+  sidebar.isOpen ? "translate-x-0" : "-translate-x-full"
+);
 
-      // If same status, sort alphabetically by name
-      if (statusComparison === 0) {
+const sortedEvents = computed(() => {
+  return eventStore.events
+    .filter((e) => !e.removed)
+    .sort((a, b) => {
+      if (a.starred === b.starred) {
         return a.event_name.localeCompare(b.event_name);
       }
-
-      return statusComparison;
+      return a.starred ? -1 : 1;
     });
-  });
+});
+
+const navigateToDashboard = () => {
+  if (
+    router.currentRoute.value.path === "/admin/dashboard" ||
+    router.currentRoute.value.path === "/tabulator/dashboard"
+  ) {
+    emit("refresh-dashboard");
+  } else {
+    // Redirect to appropriate dashboard based on role
+    router.push(
+      props.role === "admin" ? "/admin/dashboard" : "/tabulator/dashboard"
+    );
+  }
+};
+
+onMounted(() => {
+  if (!eventStore.initialized) {
+    eventStore.fetchEvents();
+  }
 });
 </script>
 
 <template>
   <div
-    class="sidebar-wrapper fixed top-0 left-0 h-full bg-gray-100 text-green-800 z-40 w-62 transition-transform duration-400 ease-in-out transform"
+    class="fixed top-0 left-0 h-full bg-gray-100 text-green-800 z-40 w-64 transition-transform duration-300 ease-in-out"
     :class="wrapperClass"
     style="margin-top: 57px"
   >
@@ -37,27 +65,28 @@ onMounted(() => {
       <nav class="sidebar-nav">
         <ul class="space-y-4">
           <li>
-            <a
-              href="#"
-              onclick="window.location.reload(true)"
-              class="menu-item"
-            >
+            <a @click.prevent="navigateToDashboard" href="#" class="menu-item">
               <i class="fas fa-tachometer-alt w-4"></i>
               <span class="ml-2">Dashboard</span>
             </a>
           </li>
-          <li>
+
+          <!-- Only show User list for admins -->
+          <li v-if="role === 'admin'">
             <a href="/users" class="menu-item">
               <i class="fas fa-user w-4"></i>
               <span class="ml-2">User list</span>
             </a>
           </li>
-          <li>
+
+          <!-- Only show Logs for admins -->
+          <li v-if="role === 'admin'">
             <a href="/logs" class="menu-item">
               <i class="fas fa-folder w-4"></i>
               <span class="ml-2">Logs</span>
             </a>
           </li>
+
           <li>
             <a href="/reports" class="menu-item">
               <i class="fas fa-file w-4"></i>
@@ -70,7 +99,7 @@ onMounted(() => {
               <span class="ml-2">My Events</span>
             </div>
             <ul class="submenu">
-              <li v-for="event in events" :key="event.event_id">
+              <li v-for="event in sortedEvents" :key="event.event_id">
                 <a
                   :href="`/events/${event.event_id}`"
                   class="event-item"

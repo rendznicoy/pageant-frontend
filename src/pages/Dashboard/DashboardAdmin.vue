@@ -1,207 +1,152 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from "vue";
-import Navbar from "../../components/Navbar.vue";
-import Sidebar from "../../components/buttons/Sidebar.vue";
-import DropdownFilter from "../../components/buttons/FilterDropdown.vue";
-import DropdownSort from "../../components/buttons//SortDropdown.vue";
-import DropdownView from "../../components/buttons//ViewDropdown.vue";
-import axiosClient from "../../axios";
-import { useSidebarStore } from "../../sidebar";
+import { ref, computed, onMounted, onUnmounted } from "vue";
+import { useEventStore } from "@/stores/event";
+import { useSidebarStore } from "@/sidebar";
+import { useRouter } from "vue-router";
+import Navbar from "@/components/layout/Navbar.vue";
+import Sidebar from "@/components/layout/Sidebar.vue";
+import EventHeader from "@/components/dashboard/EventHeader.vue";
+import EventFilters from "@/components/dashboard/EventFilters.vue";
+import CardsGrid from "@/components/dashboard/CardsGrid.vue";
+import ListGrid from "@/components/dashboard/ListGrid.vue";
 
+const eventStore = useEventStore();
 const sidebar = useSidebarStore();
+const router = useRouter();
+
+const filter = ref("all");
+const sort = ref("event_name");
+const view = ref("card");
+const showCount = ref("all");
+const isRefreshing = ref(false);
+const refreshKey = ref(0);
+
 const windowWidth = ref(window.innerWidth);
+const layoutShift = computed(() =>
+  sidebar.isOpen && windowWidth.value >= 1024 ? "ml-64" : "ml-0"
+);
 
-// Core States
-const events = ref([]);
-const filteredEvents = ref([]);
-const viewMode = ref("card"); // card or list
-const filterBy = ref("all");
-const sortBy = ref("event_name");
-const showCount = ref("all"); // 'all' or 12
-
-// Fetch events
-onMounted(async () => {
-  const res = await axiosClient.get("/api/v1/events");
-  events.value = res.data.map((event) => ({
-    ...event,
-    removed: false, // We'll locally track if "removed from view"
-  }));
-
-  applyFilters();
-});
-
-// Window resize logic
-window.addEventListener("resize", () => {
-  windowWidth.value = window.innerWidth;
-});
-
-// Computed dynamic class for main layout
-const contentClass = computed(() => {
-  if (windowWidth.value < 1024) return "";
-  return sidebar.isOpen ? "ml-64" : "ml-0";
-});
-
-const headerClass = computed(() => {
-  if (windowWidth.value < 1024) return "top-14";
-  return sidebar.isOpen ? "left-64" : "left-0";
-});
-
-// Filtering, Sorting
-const applyFilters = () => {
-  let temp = [...events.value].filter((event) => !event.removed);
-
-  if (filterBy.value !== "all") {
-    if (filterBy.value === "starred") {
-      temp = temp.filter((e) => e.starred);
-    } else if (filterBy.value === "removed") {
-      temp = events.value.filter((e) => e.removed);
-    } else {
-      temp = temp.filter((e) => e.status === filterBy.value);
-    }
-  }
-
-  // Sort
-  if (sortBy.value === "event_name") {
-    temp.sort((a, b) => a.event_name.localeCompare(b.event_name));
-  } else if (sortBy.value === "last_accessed") {
-    temp.sort((a, b) => new Date(b.last_accessed) - new Date(a.last_accessed));
-  }
-
-  // Starred always float to top on All view
-  if (filterBy.value === "all") {
-    temp.sort((a, b) => (b.starred === a.starred ? 0 : b.starred ? 1 : -1));
-  }
-
-  filteredEvents.value = temp;
+const createEvent = () => {
+  console.log("Navigating to create event page");
+  router.push("/events/create");
 };
 
-// Pagination
-const paginatedEvents = computed(() => {
-  if (showCount.value === "all") return filteredEvents.value;
-  return filteredEvents.value.slice(0, 12);
+const updateWindowWidth = () => {
+  windowWidth.value = window.innerWidth;
+};
+
+onMounted(async () => {
+  if (!eventStore.initialized) {
+    await eventStore.fetchEvents();
+  }
+  window.addEventListener("resize", updateWindowWidth);
 });
 
 onUnmounted(() => {
-  window.removeEventListener("resize", updateWidth);
+  window.removeEventListener("resize", updateWindowWidth);
 });
 
-const updateWidth = () => {
-  windowWidth.value = window.innerWidth;
-};
-
-// Refresh Page
-const refreshPage = () => {
-  window.location.reload();
-};
-
-// Actions
-const toggleStar = (eventId) => {
-  const event = events.value.find((e) => e.event_id === eventId);
-  if (event) {
-    event.starred = !event.starred;
-    applyFilters();
+const filtered = computed(() => {
+  let result = [...eventStore.events];
+  if (filter.value === "removed") {
+    result = result.filter((e) => e.removed);
+  } else {
+    result = result.filter((e) => !e.removed);
+    if (filter.value === "starred") {
+      result = result.filter((e) => e.starred);
+    } else if (filter.value !== "all") {
+      result = result.filter((e) => e.status === filter.value);
+    }
   }
-};
+  if (sort.value === "event_name") {
+    result.sort((a, b) => a.event_name.localeCompare(b.event_name));
+  } else if (sort.value === "last_accessed") {
+    result.sort(
+      (a, b) => new Date(b.last_accessed) - new Date(a.last_accessed)
+    );
+  }
+  if (filter.value === "all") {
+    result.sort((a, b) => (a.starred === b.starred ? 0 : a.starred ? -1 : 1));
+  }
+  return result;
+});
 
-const removeEvent = (eventId) => {
-  const event = events.value.find((e) => e.event_id === eventId);
-  if (event) {
-    event.removed = true;
-    applyFilters();
+const displayed = computed(() =>
+  showCount.value === "all" ? filtered.value : filtered.value.slice(0, 12)
+);
+
+const refreshDashboard = async () => {
+  isRefreshing.value = true;
+  try {
+    await eventStore.fetchEvents(true);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    refreshKey.value++;
+  } catch (error) {
+    console.error("Failed to refresh dashboard:", error);
+  } finally {
+    isRefreshing.value = false;
   }
 };
 </script>
 
 <template>
   <div class="min-h-screen bg-gray-100">
-    <Navbar />
-    <Sidebar />
+    <Navbar @refresh-dashboard="refreshDashboard" />
+    <Sidebar @refresh-dashboard="refreshDashboard" role="admin" />
 
-    <!-- Header Logo -->
-    <div
-      class="admin-header bg-white shadow-md transition-all duration-400 ease-in-out"
-      :class="headerClass"
-    >
-      <div class="flex items-center justify-center p-8 h-24">
-        <img
-          src="/VSU Logo.png"
-          alt="VISAYAS STATE UNIVERSITY"
-          class="h-14 cursor-pointer hover:opacity-90 transition-opacity"
-          @click="refreshPage"
-          title="Click to refresh"
+    <div class="transition-all duration-300" :class="layoutShift">
+      <EventHeader />
+
+      <div class="p-6">
+        <!-- Create Event Button -->
+        <div class="flex justify-end mb-4">
+          <button
+            @click="createEvent"
+            class="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none transition-colors"
+          >
+            <i class="fas fa-plus mr-2"></i>
+            Create Event
+          </button>
+        </div>
+        <EventFilters
+          v-model:filter="filter"
+          v-model:sort="sort"
+          v-model:view="view"
+          v-model:show-count="showCount"
         />
-      </div>
-    </div>
 
-    <!-- Main Content -->
-    <div
-      class="main-content transition-all duration-400 ease-in-out"
-      :class="contentClass"
-    >
-      <!-- Content Area -->
-      <div class="p-6 space-y-6">
-        <!-- Filters and Sorters -->
-        <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
-          <div class="flex space-x-2">
-            <DropdownFilter v-model="filterBy" @change="applyFilters" />
-            <DropdownSort v-model="sortBy" @change="applyFilters" />
-            <DropdownView v-model="viewMode" />
-          </div>
-          <div>
-            <button
-              disabled
-              title="Customize is under maintenance"
-              class="bg-gray-300 text-gray-600 px-4 py-2 rounded cursor-not-allowed"
-            >
-              Customize this page
-            </button>
-          </div>
-        </div>
-        <!-- Events Display -->
-        <div>
-          <div
-            v-if="filteredEvents.length === 0"
-            class="text-center text-gray-500"
-          >
-            No events found.
-          </div>
-
-          <div v-else>
-            <div
-              v-if="viewMode === 'card'"
-              class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"
-            >
-              <EventCard
-                v-for="event in paginatedEvents"
-                :key="event.event_id"
-                :event="event"
-                @toggle-star="toggleStar"
-                @remove="removeEvent"
-              />
-            </div>
-
-            <div v-else class="space-y-4">
-              <EventListItem
-                v-for="event in paginatedEvents"
-                :key="event.event_id"
-                :event="event"
-                @toggle-star="toggleStar"
-                @remove="removeEvent"
-              />
-            </div>
-          </div>
+        <div v-if="eventStore.loading" class="text-center py-8">
+          <i class="fas fa-spinner fa-spin text-2xl text-green-600"></i>
         </div>
 
-        <!-- Show Filters -->
-        <div class="flex justify-center mt-6">
-          <select
-            v-model="showCount"
-            @change="applyFilters"
-            class="border rounded px-4 py-2 text-gray-700"
+        <div v-else-if="filtered.length === 0" class="text-center py-8">
+          <p class="text-gray-500">No events found.</p>
+          <button
+            v-if="filter === 'removed'"
+            @click="filter = 'all'"
+            class="mt-4 text-green-600 hover:underline"
           >
-            <option value="all">Show All</option>
-            <option value="12">Show 12</option>
-          </select>
+            Return to all events
+          </button>
+        </div>
+
+        <div v-else>
+          <CardsGrid
+            v-if="view === 'card'"
+            :key="refreshKey"
+            :events="displayed"
+            @toggle-star="eventStore.toggleStar"
+            @remove="eventStore.toggleRemoved"
+          />
+          <div v-else class="space-y-4">
+            <ListGrid
+              v-if="view === 'list'"
+              :key="refreshKey"
+              :events="displayed"
+              @toggle-star="eventStore.toggleStar"
+              @remove="eventStore.toggleRemoved"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -209,38 +154,12 @@ const removeEvent = (eventId) => {
 </template>
 
 <style scoped>
-.main-content {
-  padding-top: 33px;
-}
-
-.admin-header {
-  position: sticky;
-  top: 56px;
-  z-index: 25;
-  transition-property: left;
-}
-
-/* Sidebar styling for diffe        rent screen sizes */
-@media (max-width: 1023px) {
-  .sidebar-wrapper {
-    z-index: 40; /* Above header and content */
-  }
-}
-
-/* Animation for click feedback */
-@keyframes pulse {
+@keyframes refreshFade {
   0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(0.98);
+    background-color: rgba(0, 128, 0, 0.1);
   }
   100% {
-    transform: scale(1);
+    background-color: transparent;
   }
-}
-
-img:active {
-  animation: pulse 0.2s ease;
 }
 </style>

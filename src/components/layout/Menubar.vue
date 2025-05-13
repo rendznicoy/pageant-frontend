@@ -1,33 +1,43 @@
 <script setup>
 import { Menu, MenuButton, MenuItems, MenuItem } from "@headlessui/vue";
-import { computed, ref } from "vue";
+import { defineEmits, defineProps } from "vue";
 import axiosClient from "../../axios";
 import { useRouter } from "vue-router";
 
 const router = useRouter();
+const emit = defineEmits(["refresh-dashboard"]);
 const props = defineProps({
   user: Object,
 });
 
-// Handle logout function using the same pattern as handleLogin
 const handleLogout = (event) => {
-  event.preventDefault(); // Prevent default link behavior
-
+  event.preventDefault();
   axiosClient.get("/api/csrf-cookie").then(() => {
     axiosClient
       .post("/api/v1/logout")
       .then((response) => {
-        // Check if logout was successful
         if (response.status === 200) {
-          // Redirect to login page
           router.push("/login/admin");
         }
       })
       .catch((error) => {
         console.error("Logout error:", error);
-        // Handle error (show message to user, etc.)
       });
   });
+};
+
+const navigateToDashboard = () => {
+  console.log(
+    "Menubar navigateToDashboard called, current path:",
+    router.currentRoute.value.path
+  );
+  if (router.currentRoute.value.path === "/admin/dashboard") {
+    console.log("Menubar emitting refresh-dashboard");
+    emit("refresh-dashboard");
+  } else {
+    console.log("Menubar redirecting to /admin/dashboard");
+    router.push("/admin/dashboard");
+  }
 };
 </script>
 
@@ -56,12 +66,12 @@ const handleLogout = (event) => {
       leave-to-class="opacity-0 scale-75"
     >
       <MenuItems
-        class="origin-top-right absolute right-1 mt-2 w-44 bg-white rounded-sm shadow-lg border py-2 focus:outline-none"
+        class="origin-top-right absolute right-1 mt-2 w-44 bg-white rounded-sm shadow-lg border py-2 focus:outline-none z-100"
       >
         <MenuItem v-slot="{ active }">
           <a
             href="#"
-            onclick="window.location.reload(true)"
+            @click.prevent="navigateToDashboard"
             :class="{ 'bg-gray-100': active }"
             class="menu-item"
           >
@@ -78,11 +88,14 @@ const handleLogout = (event) => {
           </a>
         </MenuItem>
         <MenuItem v-slot="{ active }">
-          <a href="/logs" :class="{ 'bg-gray-100': active }" class="menu-item">
+          <a
+            href="/reports"
+            :class="{ 'bg-gray-100': active }"
+            class="menu-item"
+          >
             <i class="fas fa-folder w-4"></i> Pageant Files
           </a>
         </MenuItem>
-        <!-- Properly disabled Messages menu item -->
         <MenuItem v-slot="{ active }">
           <div
             title="Messages are under maintenance."

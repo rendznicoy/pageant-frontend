@@ -2,29 +2,36 @@ import axios from "axios";
 import router from "./router.js";
 
 const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL,
+  baseURL: import.meta.env.VITE_BACKEND_URL || "http://localhost:8000",
   withCredentials: true,
   withXSRFToken: true,
   headers: {
     "X-Requested-With": "XMLHttpRequest",
-    "Content-Type": "application/json",
+    Accept: "application/json",
   },
 });
 
-/* axiosClient.interceptors.request.use((config) => {
-  config.headers.Authorization = `Bearer ${localStorage.getItem("token")}`;
-}); */
+axiosClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (config.data instanceof FormData) {
+    config.headers["Content-Type"] = "multipart/form-data";
+  }
+  return config;
+});
 
 axiosClient.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    if (error.response?.status === 401) {
+      console.info("Unauthorized, redirecting to login");
+      localStorage.removeItem("token");
       router.push({ name: "Login" });
+      return Promise.resolve();
     }
-
-    throw error;
+    return Promise.reject(error);
   }
 );
 
