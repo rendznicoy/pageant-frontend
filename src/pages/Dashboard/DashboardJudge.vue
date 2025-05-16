@@ -9,6 +9,7 @@ export default {
     return {
       event: null,
       judge_name: null,
+      judge_id: null,
       current_category: null,
       next_candidate: null,
       criteria: [],
@@ -28,6 +29,7 @@ export default {
     return { userStore, toast };
   },
   mounted() {
+    console.log("Stored token:", localStorage.getItem("token"));
     this.initializePusher();
     this.fetchCurrentSession();
   },
@@ -44,26 +46,44 @@ export default {
       });
     },
     async fetchCurrentSession() {
+      const token = localStorage.getItem("token");
+      console.log("Using token for current-session:", token);
+      if (!token) {
+        this.toast.error("No authentication token found. Please log in again.");
+        this.$router.push("/login/judge");
+        return;
+      }
       try {
         const response = await axiosClient.get("/api/v1/judge/current-session");
-        this.event = response.data.event;
-        this.judge_name = response.data.judge_name;
-        this.current_category = response.data.current_category;
-        this.next_candidate = response.data.next_candidate;
-        this.criteria = response.data.criteria;
-        if (this.event && this.current_category) {
-          this.subscribeToPusher();
+        console.log("Fetched session:", response.data);
+        if (response.status === 200) {
+          this.judge_id = response.data.judge.judge_id;
+          this.judge_name = response.data.judge_name;
+          this.event = response.data.event;
+          this.current_category = response.data.current_category;
+          this.next_candidate = response.data.next_candidate;
+          this.criteria = response.data.criteria;
+          if (this.event) {
+            this.subscribeToPusher();
+          }
         }
       } catch (error) {
-        this.toast.error("Failed to fetch session");
-        console.error("Error fetching session:", error);
+        console.error("Error fetching current session:", error);
+        this.toast.error(
+          "Failed to fetch session: " +
+            (error.response?.data?.message || error.message)
+        );
+        if (error.response?.status === 401) {
+          localStorage.removeItem("token");
+          this.$router.push("/login/judge");
+        }
       }
     },
     subscribeToPusher() {
       this.channel = this.pusher.subscribe(`event.${this.event.event_id}`);
       this.channel.bind("App\\Events\\ScoreSubmitted", (data) => {
         if (
-          data.score.judge_id === this.userStore.userId &&
+          data.score.judge_id === this.judge_id &&
           data.score.category_id === this.current_category.category_id &&
           data.score.candidate_id === this.next_candidate?.candidate_id
         ) {
@@ -73,7 +93,7 @@ export default {
       });
       this.channel.bind("App\\Events\\ScoreConfirmed", (data) => {
         if (
-          data.score.judge_id === this.userStore.userId &&
+          data.score.judge_id === this.judge_id &&
           data.score.category_id === this.current_category.category_id &&
           data.score.candidate_id === this.next_candidate?.candidate_id
         ) {
@@ -98,10 +118,10 @@ export default {
     validateScore() {
       if (
         !this.score ||
-        this.score < 1 ||
-        this.score > (this.current_category.max_score || 10)
+        this.score < 0 ||
+        this.score > 100 // Changed to 100
       ) {
-        this.toast.error("Please enter a valid score");
+        this.toast.error("Please enter a valid score (0-100)");
         return false;
       }
       return true;
@@ -109,9 +129,18 @@ export default {
     async submitScore() {
       if (!this.event || !this.current_category || !this.next_candidate) {
         this.toast.error("No active event, category, or candidate");
+        console.error(
+          "Submission blocked: missing event, category, or candidate",
+          {
+            event: this.event,
+            category: this.current_category,
+            candidate: this.next_candidate,
+          }
+        );
         return;
       }
       if (!this.validateScore()) {
+        console.error("Invalid score", { score: this.score });
         return;
       }
       this.isSubmitting = true;
@@ -123,7 +152,14 @@ export default {
           score: this.score,
           comments: this.comments || null,
         };
-        console.log("Submitting score payload:", payload);
+        console.log(
+          "Submitting score payload:",
+          payload,
+          "userId:",
+          this.userStore.userId,
+          "judge_id:",
+          this.judge_id
+        );
         const response = await axiosClient.post(
           "/api/v1/judge/submit-score",
           payload
@@ -131,11 +167,17 @@ export default {
         this.temporaryScore = response.data.score;
         this.toast.success("Score submitted, please confirm");
       } catch (error) {
+        console.error("Submission error:", {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+          headers: error.response?.headers,
+        });
         this.toast.error(
-          "Failed to submit score: " +
-            (error.response?.data?.message || error.message)
+          `Failed to submit score: ${
+            error.response?.data?.message || error.message
+          }`
         );
-        console.error("Error submitting score:", error);
       } finally {
         this.isSubmitting = false;
       }
@@ -189,9 +231,12 @@ export default {
     <div v-if="event">
       <p><strong>Event:</strong> {{ event.event_name }}</p>
       <p><strong>Status:</strong> {{ event.status }}</p>
+      <div v-if="event.status !== 'active'" class="text-red-600">
+        <p>Event is not currently active.</p>
+      </div>
     </div>
     <div v-else>
-      <p>No active event.</p>
+      <p class="text-red-600">No event assigned.</p>
     </div>
     <div v-if="current_category && next_candidate">
       <p><strong>Category:</strong> {{ current_category.category_name }}</p>
@@ -210,14 +255,12 @@ export default {
         <p class="text-gray-600">Waiting for the next candidate...</p>
       </div>
       <div v-else class="mt-4">
-        <label for="score" class="block"
-          >Score (1-{{ current_category.max_score || 10 }}):</label
-        >
+        <label for="score" class="block">Score (0-100):</label>
         <input
           type="number"
           v-model.number="score"
-          :min="1"
-          :max="current_category.max_score || 10"
+          min="0"
+          max="100"
           step="1"
           :disabled="isSubmitting || temporaryScore"
           class="border rounded px-2 py-1 w-20"

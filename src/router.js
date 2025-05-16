@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { useUserStore } from "@/stores/user"; // Import userStore
 import axiosClient from "./axios";
 import DefaultLayout from "./components/layout/DefaultLayout.vue";
 import NotFound from "./pages/NotFound.vue";

@@ -11,6 +11,8 @@ import Toast from "vue-toastification";
 import "vue-toastification/dist/index.css";
 import FlatPickr from "vue-flatpickr-component";
 import "flatpickr/dist/flatpickr.css";
+import FloatingVue from "floating-vue";
+import "floating-vue/dist/style.css";
 
 const app = createApp(App);
 const emitter = mitt();
@@ -42,6 +44,17 @@ app.component("FlatPickr", {
   },
 });
 
+// Global error handler
+app.config.errorHandler = (err, vm, info) => {
+  console.error("Vue error:", err);
+  console.error("Component:", vm);
+  console.error("Info:", info);
+  // Optionally show a toast
+  app.config.globalProperties.$toast.error(
+    "An unexpected error occurred. Please try again."
+  );
+};
+
 app.use(createPinia());
 app.use(router);
 app.config.globalProperties.emitter = emitter;
@@ -57,9 +70,16 @@ app.use(Toast, {
     error: { timeout: 5000, className: "bg-red-600 text-white" },
   },
 });
+app.use(FloatingVue);
 
 const userStore = useUserStore();
-userStore.fetchUser().then((isAuthenticated) => {
-  console.log("User authenticated:", isAuthenticated, userStore.user);
+const token = localStorage.getItem("token");
+if (token) {
+  userStore.fetchUser().then((isAuthenticated) => {
+    console.log("User authenticated:", isAuthenticated, userStore.user);
+    app.mount("#app");
+  });
+} else {
+  console.log("No token found, skipping initial fetchUser.");
   app.mount("#app");
-});
+}

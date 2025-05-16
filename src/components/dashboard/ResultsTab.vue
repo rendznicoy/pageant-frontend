@@ -1,40 +1,57 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useToast } from "vue-toastification";
+import { useRoute } from "vue-router";
 import axiosClient from "@/axios";
 
-const props = defineProps({
-  eventId: {
-    type: String,
-    required: true,
-  },
-});
-
+const route = useRoute();
 const toast = useToast();
-const scores = ref([]);
+const finalResults = ref([]);
 const loading = ref(false);
 const showPreview = ref(false);
 const previewUrl = ref("");
 
-const fetchScores = async () => {
+const eventId = computed(() => route.query.eventId);
+const stageId = computed(() => route.query.stageId);
+
+const fetchFinalResults = async () => {
+  if (!eventId.value || !stageId.value) {
+    toast.error("Missing event or stage ID.");
+    return;
+  }
   loading.value = true;
   try {
     const response = await axiosClient.get(
-      `/api/v1/events/${props.eventId}/scores`
+      `/api/v1/events/${eventId.value}/stages/${stageId.value}/partial-results`
     );
-    scores.value = response.data.data || [];
+    finalResults.value = response.data.candidates || [];
+    console.log("Final results fetched:", finalResults.value);
+    if (!finalResults.value.length) {
+      toast.info("No final results available yet.");
+    }
   } catch (error) {
-    toast.error(error.response?.data?.message || "Failed to load scores.");
+    console.error("Error fetching final results:", error);
+    toast.error(
+      error.response?.data?.message || "Failed to load final results."
+    );
   } finally {
     loading.value = false;
   }
 };
 
+const maleResults = computed(() =>
+  finalResults.value.filter((result) => result.sex === "male")
+);
+
+const femaleResults = computed(() =>
+  finalResults.value.filter((result) => result.sex === "female")
+);
+
 const downloadReport = async () => {
   loading.value = true;
   try {
     const response = await axiosClient.get(
-      `/api/v1/events/${props.eventId}/report`,
+      `/api/v1/events/${eventId.value}/report`,
       {
         responseType: "blob",
       }
@@ -42,7 +59,7 @@ const downloadReport = async () => {
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `event_${props.eventId}_report.pdf`);
+    link.setAttribute("download", `event_${eventId.value}_report.pdf`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -59,7 +76,7 @@ const previewReport = async () => {
   loading.value = true;
   try {
     const response = await axiosClient.get(
-      `/api/v1/events/${props.eventId}/results/preview`,
+      `/api/v1/events/${eventId.value}/results/preview`,
       {
         responseType: "blob",
       }
@@ -83,27 +100,30 @@ const closePreview = () => {
 };
 
 onMounted(() => {
-  fetchScores();
-  console.log("Event ID:", props.eventId);
+  if (eventId.value && stageId.value) {
+    fetchFinalResults();
+  } else {
+    toast.warning("Please select a stage to view results.");
+  }
 });
 </script>
 
 <template>
   <div class="space-y-6">
     <div class="flex justify-between items-center">
-      <h2 class="text-xl font-semibold text-gray-800">Results</h2>
+      <h2 class="text-xl font-semibold text-gray-800">Final Results</h2>
       <div class="space-x-2">
         <button
           @click="previewReport"
           class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-          :disabled="loading"
+          :disabled="loading || !eventId"
         >
           {{ loading ? "Loading..." : "Preview Results" }}
         </button>
         <button
           @click="downloadReport"
           class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-          :disabled="loading"
+          :disabled="loading || !eventId"
         >
           {{ loading ? "Downloading..." : "Download PDF Report" }}
         </button>
@@ -113,13 +133,17 @@ onMounted(() => {
     <div v-if="loading" class="flex justify-center py-12">
       <i class="fas fa-spinner fa-spin text-3xl text-green-600"></i>
     </div>
-    <div
-      v-else-if="scores.length"
-      class="bg-white rounded-lg shadow overflow-hidden"
-    >
-      <table class="min-w-full divide-y divide-gray-200">
+    <div v-else-if="finalResults.length" class="bg-white rounded-lg shadow p-6">
+      <!-- Male Candidates Table -->
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Male Candidates</h3>
+      <table class="min-w-full divide-y divide-gray-200 mb-6">
         <thead class="bg-gray-50">
           <tr>
+            <th
+              class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+            >
+              Rank
+            </th>
             <th
               class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
             >
@@ -128,43 +152,82 @@ onMounted(() => {
             <th
               class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
             >
-              Judge
-            </th>
-            <th
-              class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-            >
-              Category
-            </th>
-            <th
-              class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-            >
-              Score
+              Raw Average
             </th>
           </tr>
         </thead>
         <tbody class="bg-white divide-y divide-gray-200">
-          <tr
-            v-for="score in scores"
-            :key="`${score.judge_id}-${score.candidate_id}-${score.category_id}`"
-          >
+          <tr v-for="result in maleResults" :key="result.candidate_id">
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-              {{ score.candidate?.name || "Unknown" }}
+              {{ result.rank }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-              {{ score.judge?.name || "Unknown" }}
+              {{ result.candidate.first_name }}
+              {{ result.candidate.last_name }} (#{{
+                result.candidate.candidate_number
+              }})
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-              {{ score.category?.name || "Unknown" }}
+              {{ Number(result.raw_average).toFixed(2) }}/100
+            </td>
+          </tr>
+          <tr v-if="!maleResults.length">
+            <td colspan="3" class="px-6 py-4 text-sm text-gray-500">
+              No male candidates scored yet.
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Female Candidates Table -->
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">
+        Female Candidates
+      </h3>
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th
+              class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+            >
+              Rank
+            </th>
+            <th
+              class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+            >
+              Candidate
+            </th>
+            <th
+              class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+            >
+              Raw Average
+            </th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          <tr v-for="result in femaleResults" :key="result.candidate_id">
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+              {{ result.rank }}
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-              {{ score.score }}
+              {{ result.candidate.first_name }}
+              {{ result.candidate.last_name }} (#{{
+                result.candidate.candidate_number
+              }})
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+              {{ Number(result.raw_average).toFixed(2) }}/100
+            </td>
+          </tr>
+          <tr v-if="!femaleResults.length">
+            <td colspan="3" class="px-6 py-4 text-sm text-gray-500">
+              No female candidates scored yet.
             </td>
           </tr>
         </tbody>
       </table>
     </div>
     <div v-else class="text-center py-10">
-      <p class="text-gray-500">No results found.</p>
+      <p class="text-gray-500">No final results found.</p>
     </div>
 
     <!-- PDF Preview Modal -->

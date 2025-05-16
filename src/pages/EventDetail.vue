@@ -53,7 +53,7 @@ const tabs = computed(() => [
   { id: "candidates", label: "Candidates", disabled: false },
   { id: "judges", label: "Judges", disabled: false },
   { id: "categories", label: "Categories", disabled: false },
-  { id: "results", label: "Results", disabled: false },
+  { id: "results", label: "Results", disabled: true },
   {
     id: "stage-management",
     label: "Stage Management",

@@ -4,12 +4,10 @@ import axiosClient from "@/axios";
 
 export const useUserStore = defineStore("user", () => {
   const user = ref(null);
-  const isFetching = ref(false); // Track fetch status
+  const isFetching = ref(false);
+  const userId = ref(null);
+  const judgeId = ref(null); // Add judgeId to store judge_id
 
-  // Add computed property for userId
-  const userId = computed(() => user.value?.user_id);
-
-  // Add computed property for isAuthenticated
   const isAuthenticated = computed(() => !!user.value);
 
   const fetchUser = async () => {
@@ -20,6 +18,8 @@ export const useUserStore = defineStore("user", () => {
       const res = await axiosClient.get("/api/v1/user");
       if (res && res.data) {
         user.value = res.data;
+        userId.value = res.data.user_id;
+        judgeId.value = res.data.judge_id || null; // Set judgeId if present
         return true;
       }
       return false;
@@ -35,31 +35,46 @@ export const useUserStore = defineStore("user", () => {
     }
   };
 
-  // Add the setUser method
   const setUser = (userData) => {
     user.value = userData;
+    if (userData) {
+      userId.value = userData.user_id || null;
+      judgeId.value = userData.judge_id || null; // Set judgeId from userData
+    } else {
+      userId.value = null;
+      judgeId.value = null;
+    }
   };
 
-  // Add a logout method for completeness
+  // Optional: Explicit setJudgeId action for clarity
+  const setJudgeId = (judgeIdValue) => {
+    judgeId.value = judgeIdValue;
+  };
+
   const logout = async () => {
     try {
       await axiosClient.post("/api/v1/logout");
       user.value = null;
+      userId.value = null;
+      judgeId.value = null;
       return true;
     } catch (err) {
       console.error("Error during logout:", err);
-      // Still clear the user from store even if the API call fails
       user.value = null;
+      userId.value = null;
+      judgeId.value = null;
       return false;
     }
   };
 
   return {
     user,
-    userId, // Export the computed property
-    isAuthenticated, // Export the authentication status
+    userId,
+    judgeId, // Export judgeId
+    isAuthenticated,
     fetchUser,
     setUser,
+    setJudgeId, // Export setJudgeId
     logout,
   };
 });

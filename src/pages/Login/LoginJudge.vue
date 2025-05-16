@@ -1,13 +1,52 @@
 <script setup>
 import { ref, nextTick } from "vue";
 import { useRouter } from "vue-router";
+import { useUserStore } from "@/stores/user";
 import axiosClient from "../../axios";
 import GuestLayout from "../../components/layout/GuestLayout.vue";
+import { debounce } from "lodash"; // Import lodash debounce
 
 const router = useRouter();
+const userStore = useUserStore();
 const pinInputs = Array.from({ length: 6 }, () => ref(""));
 const inputRefs = ref([]);
 const error = ref("");
+const isLoading = ref(false);
+
+// Debounced login function
+const debouncedHandleJudgeLogin = debounce(async () => {
+  if (isLoading.value) return;
+  isLoading.value = true;
+  const pin_code = pinInputs.map((r) => r.value).join("");
+  error.value = "";
+  try {
+    await axiosClient.get("/api/csrf-cookie");
+    console.log("CSRF token fetched");
+
+    const response = await axiosClient.post("/api/v1/login/judge", {
+      pin_code,
+    });
+    if (response.status === 200) {
+      const { token, user } = response.data;
+      localStorage.setItem("token", token);
+      axiosClient.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+      console.log("Stored token in localStorage:", token);
+      console.log("User data:", user);
+
+      userStore.setUser(user);
+
+      console.log("Attempting to redirect to /judge/dashboard");
+      await router.push("/judge/dashboard");
+      console.log("Redirection completed");
+    }
+  } catch (err) {
+    error.value =
+      err.response?.data?.message || "Invalid PIN. Please try again.";
+    console.error("Judge login error:", err);
+  } finally {
+    isLoading.value = false;
+  }
+}, 300);
 
 function handleInput(index, event) {
   const value = event.target.value.toUpperCase().slice(0, 1);
@@ -34,26 +73,8 @@ function handlePaste(event) {
   event.preventDefault();
 }
 
-async function handleJudgeLogin() {
-  const pin_code = pinInputs.map((r) => r.value).join("");
-  error.value = "";
-  try {
-    await axiosClient.get("/api/csrf-cookie");
-    const response = await axiosClient.post("/api/v1/login/judge", {
-      pin_code,
-    });
-    if (response.status === 200) {
-      localStorage.setItem("token", response.data.token);
-      axiosClient.defaults.headers.common[
-        "Authorization"
-      ] = `Bearer ${response.data.token}`;
-      router.push("/judge/dashboard");
-    }
-  } catch (err) {
-    error.value =
-      err.response?.data?.message || "Invalid PIN. Please try again.";
-    console.error("Judge login error:", err);
-  }
+function handleJudgeLogin() {
+  debouncedHandleJudgeLogin();
 }
 </script>
 
@@ -86,8 +107,9 @@ async function handleJudgeLogin() {
         <button
           type="submit"
           class="w-full bg-yellow-300 text-gray-900 font-semibold py-2 rounded hover:bg-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+          :disabled="isLoading"
         >
-          Log In
+          {{ isLoading ? "Logging In..." : "Log In" }}
         </button>
       </form>
 
