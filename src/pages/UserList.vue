@@ -79,7 +79,10 @@ const fetchUsers = async () => {
   try {
     const params = filterRole.value ? { role: filterRole.value } : {};
     const response = await axiosClient.get("/api/v1/users", { params });
-    users.value = response.data;
+    users.value = response.data ?? response; // fallback
+    if (users.value && users.value.data) {
+      users.value = users.value.data;
+    }
     console.log("Users fetched:", users.value);
     // Clear selections for users no longer in the list
     selectedUsers.value = selectedUsers.value.filter((id) =>
@@ -95,6 +98,8 @@ const fetchUsers = async () => {
 
 // Filtered and sorted users
 const filteredUsers = computed(() => {
+  if (!Array.isArray(users.value)) return [];
+
   let filtered = [...users.value];
 
   // Apply role filter

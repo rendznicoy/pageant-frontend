@@ -8,26 +8,69 @@ const axiosClient = axios.create({
   headers: {
     "X-Requested-With": "XMLHttpRequest",
     Accept: "application/json",
-    "Content-Type": "application/json", // Ensure default Content-Type
+    "Content-Type": "application/json",
   },
 });
 
-axiosClient.interceptors.request.use((config) => {
+const fetchCsrfToken = async () => {
+  try {
+    await axios.get("/api/csrf-cookie", {
+      baseURL: axiosClient.defaults.baseURL,
+    });
+    console.log("CSRF token fetched successfully");
+  } catch (error) {
+    console.error("Error fetching CSRF token:", error);
+  }
+};
+
+axiosClient.interceptors.request.use(async (config) => {
+  // Fetch CSRF token for non-GET requests if not present
+  if (["post", "put", "patch", "delete"].includes(config.method)) {
+    const xsrfToken = document.cookie
+      .split("; ")
+      .find((row) => row.startsWith("XSRF-TOKEN="))
+      ?.split("=")[1];
+    if (!xsrfToken) {
+      await fetchCsrfToken();
+    }
+  }
+
   const token = localStorage.getItem("token");
+  console.log("Token in localStorage:", token);
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
     console.log("Added token to request:", token, "URL:", config.url);
   } else {
     console.warn("No token found for request:", config.url);
   }
+
   if (config.data instanceof FormData) {
     config.headers["Content-Type"] = "multipart/form-data";
+    console.log("FormData payload:");
+    for (let [key, value] of config.data.entries()) {
+      console.log(
+        `  ${key}:`,
+        value instanceof File ? `[File: ${value.name}]` : value
+      );
+    }
   }
+
+  const xsrfToken = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith("XSRF-TOKEN="))
+    ?.split("=")[1];
+  if (xsrfToken) {
+    config.headers["X-XSRF-TOKEN"] = decodeURIComponent(xsrfToken);
+    console.log("Added XSRF-TOKEN to request:", xsrfToken);
+  } else {
+    console.warn("No XSRF-TOKEN found in cookies for request:", config.url);
+  }
+
   return config;
 });
 
 axiosClient.interceptors.response.use(
-  (response) => response,
+  (response) => response.data, // ✅ Return only the .data part
   (error) => {
     if (error.response?.status === 401) {
       console.error("Unauthorized request", {
@@ -41,11 +84,13 @@ axiosClient.interceptors.response.use(
       router.push({ name: "Login" });
       return Promise.resolve();
     }
+
     console.error("API error", {
       url: error.config?.url,
       status: error.response?.status,
       message: error.response?.data?.message || error.message,
     });
+
     return Promise.reject(error);
   }
 );

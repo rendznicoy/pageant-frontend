@@ -1,21 +1,24 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { ref } from "vue";
+import { onMounted } from "vue";
 import { useUserStore } from "@/stores/user";
-import Menubar from "./Menubar.vue";
 import Notifications from "../shared/Notifications.vue";
 import { useSidebarStore } from "../../sidebar";
 
+const isRefreshing = ref(false);
 const sidebar = useSidebarStore();
 const userStore = useUserStore();
 const emit = defineEmits(["refresh-dashboard"]);
 
 const toggleSidebar = () => {
   sidebar.toggle();
+  console.log("Navbar toggled sidebar, isOpen:", sidebar.isOpen); // Debug log
 };
 
 const handleRefreshDashboard = () => {
-  console.log("Navbar forwarding refresh-dashboard");
+  isRefreshing.value = true;
   emit("refresh-dashboard");
+  setTimeout(() => (isRefreshing.value = false), 1000); // Simulate animation duration
 };
 
 onMounted(() => {
@@ -44,42 +47,6 @@ onMounted(() => {
             </div>
           </div>
         </button>
-      </div>
-
-      <!-- Center (contact info) -->
-      <div class="items-center hidden md:block">
-        <i class="fas fa-phone mr-2"></i>
-        <span>Call us : Smart - 09991980065</span>
-        <i class="fas fa-envelope ml-8 mr-2"></i>
-        <span
-          >E-mail :
-          <a
-            href="mailto:vpageantscoringsystem@gmail.com"
-            class="hover:underline"
-          >
-            vpageantscoringsystem@gmail.com
-          </a>
-        </span>
-      </div>
-
-      <!-- Right side -->
-      <div class="flex items-center space-x-4" v-if="userStore.user">
-        <!-- Notifications -->
-        <Notifications />
-        <!-- Chat / Messages - DISABLED -->
-        <div class="relative group" title="Messages are under maintenance.">
-          <i
-            class="fas fa-comment-dots text-xl text-gray-400 cursor-not-allowed"
-          ></i>
-        </div>
-
-        <!-- Profile Menu -->
-        <div v-if="userStore.user">
-          <Menubar
-            :user="userStore.user"
-            @refresh-dashboard="handleRefreshDashboard"
-          />
-        </div>
       </div>
     </div>
   </div>

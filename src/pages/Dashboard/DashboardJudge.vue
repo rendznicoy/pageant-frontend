@@ -3,6 +3,7 @@ import { useUserStore } from "@/stores/user";
 import axiosClient from "@/axios";
 import Pusher from "pusher-js";
 import { useToast } from "vue-toastification";
+import { useRouter } from "vue-router";
 
 export default {
   data() {
@@ -18,24 +19,48 @@ export default {
       temporaryScore: null,
       isSubmitting: false,
       isWaitingForNextCandidate: false,
+      hasConfirmedScore: false,
+      currentCandidateId: null,
       channel: null,
       pusher: null,
       showConfirmModal: false,
+      pollingInterval: null,
     };
   },
   setup() {
     const userStore = useUserStore();
     const toast = useToast();
-    return { userStore, toast };
+    const router = useRouter();
+    return { userStore, toast, router };
+  },
+  watch: {
+    score(newValue) {
+      console.log("Score updated:", newValue, typeof newValue);
+    },
   },
   mounted() {
     console.log("Stored token:", localStorage.getItem("token"));
+    // Add FontAwesome script dynamically if not already present
+    if (!document.getElementById("font-awesome-script")) {
+      const script = document.createElement("script");
+      script.id = "font-awesome-script";
+      script.src =
+        "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js";
+      script.integrity =
+        "sha512-Tn2m0TIpgVyTzzvmxLNuqbSJH3JP8jm+Cy3hvHrW7ndTDcJ1w5mBiksqDBb8GpE2ksktFvDB/ykZ0mDpsZj20w==";
+      script.crossOrigin = "anonymous";
+      document.head.appendChild(script);
+    }
     this.initializePusher();
     this.fetchCurrentSession();
+    this.startPolling();
   },
   beforeUnmount() {
     if (this.channel && this.event) {
       this.pusher.unsubscribe(`event.${this.event.event_id}`);
+    }
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
     }
   },
   methods: {
@@ -44,13 +69,16 @@ export default {
         cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER,
         encrypted: true,
       });
+      console.log("Pusher initialized", {
+        key: import.meta.env.VITE_PUSHER_APP_KEY,
+        cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER,
+      });
     },
     async fetchCurrentSession() {
       const token = localStorage.getItem("token");
-      console.log("Using token for current-session:", token);
       if (!token) {
         this.toast.error("No authentication token found. Please log in again.");
-        this.$router.push("/login/judge");
+        this.router.push("/login/admin");
         return;
       }
       try {
@@ -61,9 +89,44 @@ export default {
           this.judge_name = response.data.judge_name;
           this.event = response.data.event;
           this.current_category = response.data.current_category;
+          const newCandidateId =
+            response.data.next_candidate?.candidate_id || null;
+          if (newCandidateId !== this.currentCandidateId) {
+            this.currentCandidateId = newCandidateId;
+            this.hasConfirmedScore = false;
+            this.score = null;
+            this.comments = "";
+            this.temporaryScore = null;
+          }
           this.next_candidate = response.data.next_candidate;
           this.criteria = response.data.criteria;
-          if (this.event) {
+          this.isWaitingForNextCandidate =
+            this.current_category && !this.next_candidate;
+          // Handle score_status
+          if (response.data.score_status === "confirmed") {
+            this.hasConfirmedScore = true;
+            this.isWaitingForNextCandidate = true;
+          } else if (response.data.score_status === "temporary") {
+            this.temporaryScore = {
+              score:
+                response.data.score_status === "temporary"
+                  ? response.data.score
+                  : null,
+              comments: response.data.comments || null,
+            };
+          } else {
+            this.hasConfirmedScore = false;
+            this.temporaryScore = null;
+          }
+          if (this.event && this.event.status === "completed") {
+            this.toast.info(
+              "The event has been finalized. Thank you for your participation."
+            );
+            if (this.channel && this.event) {
+              this.pusher.unsubscribe(`event.${this.event.event_id}`);
+            }
+            this.router.push("/judge/thank-you");
+          } else if (this.event && !this.channel) {
             this.subscribeToPusher();
           }
         }
@@ -75,16 +138,28 @@ export default {
         );
         if (error.response?.status === 401) {
           localStorage.removeItem("token");
-          this.$router.push("/login/judge");
+          this.router.push("/login/admin");
         }
       }
     },
     subscribeToPusher() {
       this.channel = this.pusher.subscribe(`event.${this.event.event_id}`);
+      console.log("Subscribed to channel", `event.${this.event.event_id}`);
+      this.channel.bind("pusher:subscription_succeeded", () => {
+        console.log(
+          "Pusher subscription succeeded for channel",
+          `event.${this.event.event_id}`
+        );
+      });
+      this.channel.bind("pusher:subscription_error", (error) => {
+        console.error("Pusher subscription error", error);
+        this.toast.error("Failed to subscribe to event updates");
+      });
       this.channel.bind("App\\Events\\ScoreSubmitted", (data) => {
+        console.log("ScoreSubmitted event received", data);
         if (
           data.score.judge_id === this.judge_id &&
-          data.score.category_id === this.current_category.category_id &&
+          data.score.category_id === this.current_category?.category_id &&
           data.score.candidate_id === this.next_candidate?.candidate_id
         ) {
           this.temporaryScore = data.score;
@@ -92,41 +167,106 @@ export default {
         }
       });
       this.channel.bind("App\\Events\\ScoreConfirmed", (data) => {
+        console.log("ScoreConfirmed event received", data);
         if (
           data.score.judge_id === this.judge_id &&
-          data.score.category_id === this.current_category.category_id &&
+          data.score.category_id === this.current_category?.category_id &&
           data.score.candidate_id === this.next_candidate?.candidate_id
         ) {
           this.temporaryScore = null;
           this.score = null;
           this.comments = "";
           this.isWaitingForNextCandidate = true;
+          this.hasConfirmedScore = true;
           this.toast.success("Score confirmed");
+          if (data.all_confirmed) {
+            this.isWaitingForNextCandidate = true;
+          }
         }
       });
       this.channel.bind("App\\Events\\CandidateSet", (data) => {
-        if (data.category_id === this.current_category.category_id) {
+        console.log("CandidateSet event received", data);
+        if (data.category_id === this.current_category?.category_id) {
           this.fetchCurrentSession();
           this.temporaryScore = null;
           this.score = null;
           this.comments = "";
           this.isWaitingForNextCandidate = false;
+          this.hasConfirmedScore = false;
           this.toast.info("New candidate assigned");
         }
       });
+      this.channel.bind("App\\Events\\EventFinalized", (data) => {
+        console.log("EventFinalized event received", data);
+        if (data.event_id === this.event.event_id) {
+          this.toast.info(
+            "The event has been finalized. Thank you for your participation."
+          );
+          this.pusher.unsubscribe(`event.${this.event.event_id}`);
+          this.router.push("/judge/thank-you");
+        }
+      });
+    },
+    startPolling() {
+      this.pollingInterval = setInterval(() => {
+        if (this.event && !this.hasConfirmedScore) {
+          this.fetchCurrentSession();
+        }
+      }, 10000);
     },
     validateScore() {
-      if (
-        !this.score ||
-        this.score < 0 ||
-        this.score > 100 // Changed to 100
-      ) {
+      if (this.score == null) {
+        console.debug("Score validation failed: Score is empty", {
+          score: this.score,
+        });
+        this.toast.error("Score field is required");
+        return false;
+      }
+      if (this.score < 0 || this.score > 100) {
+        console.debug("Score validation failed: Score out of range", {
+          score: this.score,
+        });
         this.toast.error("Please enter a valid score (0-100)");
         return false;
       }
       return true;
     },
+    handleScoreInput(event) {
+      let value = event.target.value;
+      value = value.replace(/[^0-9]/g, "");
+      const numValue = value === "" ? null : parseInt(value, 10);
+      if (numValue !== null && numValue > 100) {
+        this.score = 100;
+        this.toast.warning("Score cannot exceed 100");
+      } else {
+        this.score = numValue;
+      }
+      event.target.value = this.score === null ? "" : this.score;
+    },
+    restrictScoreKeydown(event) {
+      const allowedKeys = [
+        "Backspace",
+        "Delete",
+        "ArrowLeft",
+        "ArrowRight",
+        "Tab",
+      ];
+      if (allowedKeys.includes(event.key)) {
+        return;
+      }
+      if (/^[0-9]$/.test(event.key)) {
+        const currentValue = event.target.value + event.key;
+        const numValue = parseInt(currentValue, 10);
+        if (numValue > 100) {
+          event.preventDefault();
+          this.toast.warning("Score cannot exceed 100");
+        }
+        return;
+      }
+      event.preventDefault();
+    },
     async submitScore() {
+      console.log("Submit score clicked, toast instance:", this.toast);
       if (!this.event || !this.current_category || !this.next_candidate) {
         this.toast.error("No active event, category, or candidate");
         console.error(
@@ -140,7 +280,9 @@ export default {
         return;
       }
       if (!this.validateScore()) {
-        console.error("Invalid score", { score: this.score });
+        console.error("Invalid score submission attempt", {
+          score: this.score,
+        });
         return;
       }
       this.isSubmitting = true;
@@ -209,6 +351,7 @@ export default {
         this.score = null;
         this.comments = "";
         this.isWaitingForNextCandidate = true;
+        this.hasConfirmedScore = true;
         this.toast.success("Score confirmed");
       } catch (error) {
         this.toast.error(
@@ -225,104 +368,401 @@ export default {
 </script>
 
 <template>
-  <div class="container mx-auto p-4">
-    <h1 class="text-2xl font-bold mb-4">Judge Dashboard</h1>
-    <p><strong>Judge:</strong> {{ judge_name }}</p>
-    <div v-if="event">
-      <p><strong>Event:</strong> {{ event.event_name }}</p>
-      <p><strong>Status:</strong> {{ event.status }}</p>
-      <div v-if="event.status !== 'active'" class="text-red-600">
-        <p>Event is not currently active.</p>
-      </div>
-    </div>
-    <div v-else>
-      <p class="text-red-600">No event assigned.</p>
-    </div>
-    <div v-if="current_category && next_candidate">
-      <p><strong>Category:</strong> {{ current_category.category_name }}</p>
-      <p><strong>Stage:</strong> {{ current_category.stage_name }}</p>
-      <p>
-        <strong>Candidate:</strong> {{ next_candidate.first_name }}
-        {{ next_candidate.last_name }} (#{{ next_candidate.candidate_number }})
-      </p>
-      <img
-        v-if="next_candidate.photo"
-        :src="next_candidate.photo"
-        alt="Candidate Photo"
-        class="w-32 h-32 object-cover my-2"
-      />
-      <div v-if="isWaitingForNextCandidate" class="mt-4">
-        <p class="text-gray-600">Waiting for the next candidate...</p>
-      </div>
-      <div v-else class="mt-4">
-        <label for="score" class="block">Score (0-100):</label>
-        <input
-          type="number"
-          v-model.number="score"
-          min="0"
-          max="100"
-          step="1"
-          :disabled="isSubmitting || temporaryScore"
-          class="border rounded px-2 py-1 w-20"
-        />
-        <label for="comments" class="block mt-2">Comments:</label>
-        <textarea
-          v-model="comments"
-          :disabled="isSubmitting || temporaryScore"
-          class="border rounded px-2 py-1 w-full"
-        ></textarea>
-      </div>
-      <div v-if="!isWaitingForNextCandidate" class="mt-4">
-        <button
-          @click="submitScore"
-          :disabled="!score || isSubmitting || temporaryScore"
-          class="bg-green-500 text-white px-4 py-2 rounded mr-2"
-        >
-          Submit Score
-        </button>
-        <button
-          v-if="temporaryScore"
-          @click="confirmScore"
-          :disabled="isSubmitting"
-          class="bg-blue-500 text-white px-4 py-2 rounded"
-        >
-          Confirm Score
-        </button>
-      </div>
-      <div v-if="temporaryScore" class="mt-4">
-        <p><strong>Temporary Score:</strong> {{ temporaryScore.score }}</p>
-        <p>
-          <strong>Comments:</strong> {{ temporaryScore.comments || "None" }}
+  <div class="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <!-- Header Section -->
+    <header class="bg-green-600 text-white shadow-md">
+      <div class="container mx-auto py-4 px-6">
+        <h1 class="text-3xl font-bold">Judge Dashboard</h1>
+        <p class="text-sm opacity-90">
+          {{ judge_name ? `Welcome, ${judge_name}` : "Loading..." }}
         </p>
       </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="container mx-auto px-6 py-8">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Event Information Card -->
+        <div
+          class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
+        >
+          <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
+            Event Information
+          </h2>
+          <div v-if="event" class="space-y-2">
+            <div class="flex items-center">
+              <div class="w-32 font-medium text-gray-600">Event Name:</div>
+              <div class="text-gray-800">{{ event.event_name }}</div>
+            </div>
+            <div class="flex items-center">
+              <div class="w-32 font-medium text-gray-600">Date:</div>
+              <div class="text-gray-800">
+                {{ new Date().toLocaleDateString() }}
+              </div>
+            </div>
+            <div class="flex items-center">
+              <div class="w-32 font-medium text-gray-600">Location:</div>
+              <div class="text-gray-800">{{ event.venue || "TBA" }}</div>
+            </div>
+            <div class="flex items-center">
+              <div class="w-32 font-medium text-gray-600">Status:</div>
+              <div class="text-gray-800">
+                <span
+                  :class="{
+                    'px-2 py-1 rounded text-xs font-medium': true,
+                    'bg-green-100 text-green-800': event.status === 'active',
+                    'bg-red-100 text-red-800': event.status === 'completed',
+                    'bg-yellow-100 text-yellow-800':
+                      event.status !== 'active' && event.status !== 'completed',
+                  }"
+                >
+                  {{
+                    event.status.charAt(0).toUpperCase() + event.status.slice(1)
+                  }}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div v-else class="flex items-center justify-center h-24">
+            <div class="animate-pulse text-gray-400">
+              Loading event information...
+            </div>
+          </div>
+        </div>
+
+        <!-- Judge's Details Card -->
+        <div
+          class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
+        >
+          <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
+            Judge's Details
+          </h2>
+          <div class="space-y-2">
+            <div class="flex items-center">
+              <div class="w-32 font-medium text-gray-600">Judge Name:</div>
+              <div class="text-gray-800">{{ judge_name || "Loading..." }}</div>
+            </div>
+            <div class="flex items-center">
+              <div class="w-32 font-medium text-gray-600">Category:</div>
+              <div class="text-gray-800">
+                {{ current_category?.category_name || "Not assigned" }}
+              </div>
+            </div>
+            <div v-if="current_category" class="flex items-center">
+              <div class="w-32 font-medium text-gray-600">Stage:</div>
+              <div class="text-gray-800">{{ current_category.stage_name }}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scoring Criteria Card -->
+        <div
+          class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
+        >
+          <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
+            Scoring Criteria
+          </h2>
+          <div class="space-y-2">
+            <p class="text-gray-700">
+              <strong>Instructions:</strong> Rate each candidate on a scale of 0
+              to 100.
+            </p>
+            <ul class="list-disc pl-5 text-gray-700">
+              <li
+                v-for="(criterion, index) in criteria"
+                :key="index"
+                class="mb-1"
+              >
+                {{ criterion.name }}: {{ criterion.description }}
+              </li>
+              <li v-if="!criteria || criteria.length === 0">
+                General impression, artistic performance, and overall
+                presentation.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current Candidate Section -->
+      <div
+        class="mt-8 bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
+      >
+        <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
+          Current Candidate
+        </h2>
+
+        <!-- Loading State -->
+        <div v-if="!event" class="flex items-center justify-center h-32">
+          <div class="animate-pulse text-gray-400">
+            Loading event information...
+          </div>
+        </div>
+
+        <!-- Event Completed -->
+        <div v-else-if="event.status === 'completed'" class="text-center py-8">
+          <div class="text-3xl text-green-600 mb-4">
+            <i class="fas fa-check-circle"></i>
+          </div>
+          <p class="text-lg text-gray-700">The event has been finalized.</p>
+          <p class="text-gray-600">Thank you for your participation!</p>
+        </div>
+
+        <!-- Event Not Active -->
+        <div v-else-if="event.status !== 'active'" class="text-center py-8">
+          <div class="text-3xl text-yellow-600 mb-4">
+            <i class="fas fa-exclamation-triangle"></i>
+          </div>
+          <p class="text-lg text-gray-700">Event is not currently active.</p>
+          <p class="text-gray-600">Please check back later.</p>
+        </div>
+
+        <!-- No Category or Candidate -->
+        <div
+          v-else-if="!current_category || !next_candidate"
+          class="text-center py-8"
+        >
+          <div class="text-3xl text-blue-600 mb-4">
+            <i class="fas fa-hourglass-half"></i>
+          </div>
+          <p
+            v-if="current_category && !next_candidate"
+            class="text-lg text-gray-700"
+          >
+            Dear Judge, all candidates in this category have been scored.
+          </p>
+          <p v-else class="text-lg text-gray-700">
+            No active category or candidate for scoring.
+          </p>
+          <p class="text-gray-600">Please await further instructions.</p>
+        </div>
+
+        <!-- Score Already Confirmed -->
+        <div
+          v-else-if="isWaitingForNextCandidate || hasConfirmedScore"
+          class="text-center py-8"
+        >
+          <div class="text-3xl text-green-600 mb-4">
+            <i class="fas fa-check-circle"></i>
+          </div>
+          <p class="text-lg text-gray-700">
+            {{
+              hasConfirmedScore
+                ? "Your score has been submitted and confirmed."
+                : "All candidates in this category have been scored."
+            }}
+          </p>
+          <p class="text-gray-600">
+            Please await the announcement of the next candidate or final
+            results.
+          </p>
+        </div>
+
+        <!-- Active Candidate for Scoring -->
+        <div v-else class="transition-opacity duration-500 ease-in-out">
+          <div class="flex flex-col md:flex-row items-start">
+            <!-- Candidate Info -->
+            <div class="md:w-1/3 mb-6 md:mb-0">
+              <div class="flex items-center mb-4">
+                <div class="text-2xl font-bold text-gray-800">
+                  {{ next_candidate.first_name }} {{ next_candidate.last_name }}
+                </div>
+                <div
+                  class="ml-3 px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded"
+                >
+                  #{{ next_candidate.candidate_number }}
+                </div>
+              </div>
+
+              <div class="relative">
+                <img
+                  v-if="next_candidate.photo"
+                  :src="next_candidate.photo"
+                  alt="Candidate Photo"
+                  class="w-48 h-48 object-cover rounded-lg shadow-md transition-transform duration-300 hover:scale-105"
+                />
+                <div
+                  v-else
+                  class="w-48 h-48 bg-gray-200 rounded-lg flex items-center justify-center text-gray-400"
+                >
+                  No photo available
+                </div>
+              </div>
+            </div>
+
+            <!-- Scoring Form -->
+            <div class="md:w-2/3 md:pl-8">
+              <!-- Temporary Score Display -->
+              <div
+                v-if="temporaryScore"
+                class="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200"
+              >
+                <h3 class="text-lg font-semibold text-blue-800 mb-2">
+                  Temporary Score
+                </h3>
+                <div class="flex items-center mb-2">
+                  <div class="w-24 font-medium text-gray-600">Score:</div>
+                  <div class="text-xl font-bold text-blue-800">
+                    {{ temporaryScore.score }}
+                  </div>
+                </div>
+                <div class="flex items-start">
+                  <div class="w-24 font-medium text-gray-600">Comments:</div>
+                  <div class="text-gray-800">
+                    {{ temporaryScore.comments || "None" }}
+                  </div>
+                </div>
+
+                <button
+                  @click="confirmScore"
+                  :disabled="isSubmitting"
+                  class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                  <span v-if="isSubmitting" class="mr-2">
+                    <svg
+                      class="animate-spin h-5 w-5 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                  </span>
+                  Confirm Score
+                </button>
+              </div>
+
+              <!-- Score Input Form -->
+              <div v-else>
+                <div class="mb-6">
+                  <label
+                    for="score"
+                    class="block text-lg font-medium text-gray-700 mb-2"
+                    >Score (0-100):</label
+                  >
+                  <div class="relative">
+                    <input
+                      type="text"
+                      id="score"
+                      v-model="score"
+                      @input="handleScoreInput"
+                      @keydown="restrictScoreKeydown"
+                      :disabled="isSubmitting"
+                      placeholder="Enter score"
+                      class="border border-gray-300 rounded-lg px-4 py-3 w-full text-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300"
+                    />
+                    <div
+                      v-if="score !== null"
+                      class="absolute right-4 top-3 text-xl font-bold text-blue-600"
+                    >
+                      {{ score }}/100
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mb-6">
+                  <label
+                    for="comments"
+                    class="block text-lg font-medium text-gray-700 mb-2"
+                    >Comments:</label
+                  >
+                  <textarea
+                    id="comments"
+                    v-model="comments"
+                    :disabled="isSubmitting"
+                    placeholder="Optional comments about the candidate's performance"
+                    rows="4"
+                    class="border border-gray-300 rounded-lg px-4 py-3 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300"
+                  ></textarea>
+                </div>
+
+                <button
+                  @click="submitScore"
+                  :disabled="isSubmitting"
+                  class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                >
+                  <span v-if="isSubmitting" class="mr-2">
+                    <svg
+                      class="animate-spin h-5 w-5 text-white"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        class="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        stroke-width="4"
+                      ></circle>
+                      <path
+                        class="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      ></path>
+                    </svg>
+                  </span>
+                  Submit Score
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div v-else-if="event">
-      <p>No active category or candidate for scoring.</p>
-    </div>
+
+    <!-- Confirmation Modal -->
     <div
       v-if="showConfirmModal"
-      class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center"
+      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 transition-opacity duration-300"
     >
-      <div class="bg-white p-6 rounded shadow-lg">
-        <p>
-          Are you sure you want to confirm a score of {{ score }}
+      <div
+        class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 transform transition-all duration-300 ease-out"
+        :class="
+          showConfirmModal ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
+        "
+      >
+        <h3 class="text-xl font-bold text-gray-800 mb-4">Confirm Score</h3>
+        <p class="text-gray-700 mb-6">
+          Are you sure you want to confirm a score of
+          <span class="font-bold text-blue-600">{{ score }}</span>
           {{
-            comments ? 'with comments: "' + comments + '"' : "without comments"
+            comments ? "with the following comments:" : "without any comments?"
           }}
-          for {{ next_candidate.first_name }} {{ next_candidate.last_name }}?
         </p>
-        <div class="mt-4">
-          <button
-            @click="confirmScoreSubmission(true)"
-            class="bg-green-500 text-white px-4 py-2 rounded mr-2"
-          >
-            Yes
-          </button>
+
+        <div
+          v-if="comments"
+          class="bg-gray-50 p-3 rounded mb-6 text-gray-700 italic"
+        >
+          "{{ comments }}"
+        </div>
+
+        <div class="flex justify-end space-x-3">
           <button
             @click="confirmScoreSubmission(false)"
-            class="bg-red-500 text-white px-4 py-2 rounded"
+            class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100 transition-colors duration-300"
           >
-            No
+            Cancel
+          </button>
+          <button
+            @click="confirmScoreSubmission(true)"
+            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-300"
+          >
+            Confirm
           </button>
         </div>
       </div>
