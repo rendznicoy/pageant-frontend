@@ -1,38 +1,55 @@
 <script setup>
-import { computed, ref, onMounted, defineEmits, defineProps } from "vue";
+import {
+  computed,
+  onMounted,
+  onUnmounted,
+  ref,
+  defineEmits,
+  defineProps,
+} from "vue";
 import { useSidebarStore } from "../../sidebar";
 import { useEventStore } from "@/stores/event";
+import { useUserStore } from "@/stores/user";
 import { useRouter } from "vue-router";
+import axiosClient from "../../axios";
 
 const router = useRouter();
 const sidebar = useSidebarStore();
 const eventStore = useEventStore();
-
+const userStore = useUserStore();
 const emit = defineEmits(["refresh-dashboard"]);
+const imageError = ref(false);
 
-// Define props
 const props = defineProps({
   role: {
     type: String,
-    default: "admin", // Default to admin if not specified
+    default: "admin",
     validator: (value) => ["admin", "tabulator"].includes(value),
   },
 });
 
-const wrapperClass = computed(() =>
-  sidebar.isOpen ? "translate-x-0" : "-translate-x-full"
-);
+const wrapperClass = computed(() => {
+  console.log("Sidebar isOpen:", sidebar.isOpen); // Debug log
+  return sidebar.isOpen ? "translate-x-0" : "-translate-x-full";
+});
 
 const sortedEvents = computed(() => {
   return eventStore.events
     .filter((e) => !e.removed)
-    .sort((a, b) => {
-      if (a.starred === b.starred) {
-        return a.event_name.localeCompare(b.event_name);
-      }
-      return a.starred ? -1 : 1;
-    });
+    .sort((a, b) => a.event_name.localeCompare(b.event_name));
 });
+
+// Add a computed property for the profile image
+const profileImageUrl = computed(() => {
+  if (imageError.value || !userStore.user?.profile_photo) {
+    return "/user24.png";
+  }
+  return userStore.user.profile_photo;
+});
+
+const handleImageError = () => {
+  imageError.value = true;
+};
 
 const navigateToDashboard = () => {
   if (
@@ -41,28 +58,78 @@ const navigateToDashboard = () => {
   ) {
     emit("refresh-dashboard");
   } else {
-    // Redirect to appropriate dashboard based on role
     router.push(
       props.role === "admin" ? "/admin/dashboard" : "/tabulator/dashboard"
     );
   }
 };
 
+const handleLogout = (event) => {
+  event.preventDefault();
+  axiosClient.get("/api/csrf-cookie").then(() => {
+    axiosClient
+      .post("/api/v1/logout")
+      .then((response) => {
+        if (response.status === 200) {
+          router.push("/login/admin");
+        }
+      })
+      .catch((error) => {
+        console.error("Logout error:", error);
+      });
+  });
+};
+
 onMounted(() => {
   if (!eventStore.initialized) {
     eventStore.fetchEvents();
   }
+  userStore.fetchUser();
+  document.addEventListener("click", handleOutsideClick);
 });
+
+onUnmounted(() => {
+  document.removeEventListener("click", handleOutsideClick);
+});
+
+const handleOutsideClick = (event) => {
+  const sidebarElement = document.querySelector(".sidebar-nav");
+  const burgerButton = document.querySelector(".burger-container");
+  if (
+    sidebar.isOpen &&
+    sidebarElement &&
+    !sidebarElement.contains(event.target) &&
+    !burgerButton.contains(event.target)
+  ) {
+    sidebar.toggle();
+    console.log("Sidebar closed via outside click, isOpen:", sidebar.isOpen); // Debug log
+  }
+};
 </script>
 
 <template>
   <div
-    class="fixed top-0 left-0 h-full bg-gray-100 text-green-800 z-40 w-64 transition-transform duration-300 ease-in-out"
+    class="fixed top-0 left-0 h-full bg-gray-100 text-green-800 z-40 w-64 transition-transform duration-300 ease-in-out sidebar-nav"
     :class="wrapperClass"
     style="margin-top: 57px"
   >
-    <div class="p-4">
-      <nav class="sidebar-nav">
+    <div class="p-4 flex flex-col h-full">
+      <!-- User Profile Section with improved image handling -->
+      <div v-if="userStore.user" class="p-4 border-b mb-4">
+        <div class="flex items-center space-x-2">
+          <img
+            class="w-8 h-8 rounded-full object-cover"
+            :src="profileImageUrl"
+            @error="handleImageError"
+            alt="Profile Picture"
+          />
+          <span class="text-sm">
+            {{ userStore.user.first_name }} {{ userStore.user.last_name }}
+          </span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav flex-grow">
         <ul class="space-y-4">
           <li>
             <a @click.prevent="navigateToDashboard" href="#" class="menu-item">
@@ -70,33 +137,16 @@ onMounted(() => {
               <span class="ml-2">Dashboard</span>
             </a>
           </li>
-
-          <!-- Only show User list for admins -->
           <li v-if="role === 'admin'">
             <a href="/users" class="menu-item">
               <i class="fas fa-user w-4"></i>
-              <span class="ml-2">User list</span>
-            </a>
-          </li>
-
-          <!-- Only show Logs for admins -->
-          <li v-if="role === 'admin'">
-            <a href="/logs" class="menu-item">
-              <i class="fas fa-folder w-4"></i>
-              <span class="ml-2">Logs</span>
-            </a>
-          </li>
-
-          <li>
-            <a href="/reports" class="menu-item">
-              <i class="fas fa-file w-4"></i>
-              <span class="ml-2">Pageant Files</span>
+              <span class="ml-2">Users</span>
             </a>
           </li>
           <li class="menu-section">
             <div class="menu-header">
               <i class="fas fa-calendar-alt w-4"></i>
-              <span class="ml-2">My Events</span>
+              <span class="ml-2">Events</span>
             </div>
             <ul class="submenu">
               <li v-for="event in sortedEvents" :key="event.event_id">
@@ -125,6 +175,12 @@ onMounted(() => {
               </li>
             </ul>
           </li>
+          <li>
+            <a href="#" @click.prevent="handleLogout" class="menu-item">
+              <i class="fas fa-sign-out-alt w-4"></i>
+              <span class="ml-2">Log Out</span>
+            </a>
+          </li>
         </ul>
       </nav>
     </div>
@@ -132,9 +188,10 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* Keep your existing styles */
 .sidebar-wrapper {
-  background-color: #f2f2f2; /* bg-gray-100 */
-  color: #19470d; /* text-green-800 */
+  background-color: #f2f2f2;
+  color: #19470d;
 }
 
 .menu-item {
@@ -225,7 +282,7 @@ onMounted(() => {
 
 .menu-item:hover i,
 .submenu-item:hover i {
-  color: #166534; /* text-green-800 */
+  color: #166534;
 }
 
 .event-item.bg-green-400 {
@@ -238,7 +295,6 @@ onMounted(() => {
   border-color: #60a5fa;
 }
 
-/* Icon colors */
 .event-item .fas {
   color: inherit;
 }

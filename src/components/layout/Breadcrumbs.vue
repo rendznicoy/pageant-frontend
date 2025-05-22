@@ -19,9 +19,14 @@ const props = defineProps({
   },
 });
 
-const navigate = (to) => {
+const navigate = (to, label) => {
   if (to) {
-    router.push(to);
+    if (label === "Home" && to === "/admin/dashboard") {
+      window.dispatchEvent(new Event("refresh-dashboard"));
+      router.push(to);
+    } else {
+      router.push(to);
+    }
   }
 };
 </script>
@@ -36,6 +41,7 @@ const navigate = (to) => {
             <router-link
               v-if="item.to"
               :to="item.to"
+              @click="navigate(item.to, item.label)"
               class="text-green-600 hover:text-orange-600 hover:underline transition"
             >
               {{ item.label }}

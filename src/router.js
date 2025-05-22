@@ -1,29 +1,19 @@
 import { createRouter, createWebHistory } from "vue-router";
-import { useUserStore } from "@/stores/user"; // Import userStore
+import { useUserStore } from "@/stores/user";
 import axiosClient from "./axios";
 import DefaultLayout from "./components/layout/DefaultLayout.vue";
 import NotFound from "./pages/NotFound.vue";
 import Confirmation from "./pages/Confirmation.vue";
-import Logs from "./pages/Logs.vue";
-import Notification from "./pages/Notification.vue";
-import Profile from "./pages/Profile.vue";
-import Preferences from "./pages/Preferences.vue";
 import CreateEvent from "./pages/CreateEvent.vue";
 import EventRedirect from "./pages/EventRedirect.vue";
 import EventDetail from "./pages/EventDetail.vue";
-
-// Dashboard Pages
 import DashboardAdmin from "./pages/Dashboard/DashboardAdmin.vue";
 import DashboardTabulator from "./pages/Dashboard/DashboardTabulator.vue";
 import DashboardJudge from "./pages/Dashboard/DashboardJudge.vue";
-
-// Auth Pages
 import Login from "./pages/Login/Login.vue";
 import LoginJudge from "./pages/Login/LoginJudge.vue";
 import SignupAdmin from "./pages/Signup/SignupAdmin.vue";
 import SignupTabulator from "./pages/Signup/SignupTabulator.vue";
-
-// Other Pages
 import Images from "./pages/Images.vue";
 import UserList from "./pages/UserList.vue";
 import Events from "./pages/Events.vue";
@@ -31,13 +21,13 @@ import Categories from "./pages/Categories.vue";
 import Candidates from "./pages/Candidates.vue";
 import Judges from "./pages/Judges.vue";
 import Scores from "./pages/Scores.vue";
-import Reports from "./pages/Reports.vue";
 import Forgot from "./pages/Forgot.vue";
+import ThankYou from "./pages/ThankYou.vue";
 
 const routes = [
   {
     path: "/",
-    redirect: "/login/admin", // Redirect root path to admin login
+    redirect: "/login/admin",
   },
   {
     path: "/",
@@ -60,6 +50,12 @@ const routes = [
         name: "JudgeDashboard",
         component: DashboardJudge,
         meta: { requiresAuth: true, role: "judge" },
+      },
+      {
+        path: "/judge/thank-you",
+        name: "ThankYou",
+        component: ThankYou,
+        meta: { requiresAuth: false },
       },
       {
         path: "/images",
@@ -97,11 +93,6 @@ const routes = [
         component: Scores,
       },
       {
-        path: "/reports",
-        name: "Reports",
-        component: Reports,
-      },
-      {
         path: "/forgot",
         name: "Forgot",
         component: Forgot,
@@ -110,28 +101,7 @@ const routes = [
         path: "/confirmation",
         name: "Confirmation",
         component: Confirmation,
-        // Adding meta property to indicate this route expects POST data
         meta: { expectsFormData: true },
-      },
-      {
-        path: "/logs",
-        name: "Logs",
-        component: Logs,
-      },
-      {
-        path: "/notification",
-        name: "Notification",
-        component: Notification,
-      },
-      {
-        path: "/profile",
-        name: "Profile",
-        component: Profile,
-      },
-      {
-        path: "/preferences",
-        name: "Preferences",
-        component: Preferences,
       },
       {
         path: "/events/create",
@@ -151,10 +121,14 @@ const routes = [
         component: EventDetail,
         meta: { requiresAuth: true },
       },
+      {
+        path: "/events/:id/edit",
+        name: "EventEdit",
+        component: CreateEvent, // Reuse CreateEvent for editing
+        meta: { requiresAuth: true },
+      },
     ],
   },
-
-  // Auth Routes
   {
     path: "/login/admin",
     name: "Login",
@@ -175,8 +149,6 @@ const routes = [
     name: "SignupTabulator",
     component: SignupTabulator,
   },
-
-  // Catch-all route
   {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
@@ -192,8 +164,7 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   if (to.meta.requiresAuth) {
     try {
-      // Check if authenticated by making a request to a protected endpoint
-      await axiosClient.get("/api/v1/user"); // or whatever endpoint checks authentication
+      await axiosClient.get("/api/v1/user");
       next();
     } catch (error) {
       next("/login/admin");

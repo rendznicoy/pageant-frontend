@@ -1,122 +1,96 @@
-import { format, parseISO, isValid } from "date-fns";
-
+// DateUtils.js
 /**
- * Comprehensive date handling utilities for consistent date formatting
- * throughout the application
+ * Utility class for handling date formatting and parsing throughout the application
  */
-export default {
+export default class DateUtils {
   /**
-   * Format a date string or object for display
-   * @param {string|Date} dateValue - The date to format
-   * @param {string} formatStr - The format string (default: 'MMMM d, yyyy h:mm a')
-   * @returns {string} - Formatted date string or fallback text
+   * Formats a date string for display in input[type="datetime-local"] fields
+   * @param {string|Date} date - The date to format (ISO string or Date object)
+   * @returns {string} - Formatted date string (YYYY-MM-DDThh:mm)
    */
-  formatDate(dateValue, formatStr = "MMMM d, yyyy h:mm a") {
-    if (!dateValue) return "Not set";
-
-    let date;
-
+  static formatForInput(date) {
+    if (!date) return "";
     try {
-      // Handle different input types
-      if (dateValue instanceof Date) {
-        date = dateValue;
-      }
-      // ISO format from API (with T separator and timezone)
-      else if (typeof dateValue === "string" && dateValue.includes("T")) {
-        date = new Date(dateValue);
-      }
-      // MySQL datetime format (YYYY-MM-DD HH:MM:SS)
-      else if (typeof dateValue === "string" && dateValue.includes(" ")) {
-        const [datePart, timePart] = dateValue.split(" ");
-        // Construct valid ISO string and parse
-        date = new Date(`${datePart}T${timePart}Z`);
-      }
-      // Fallback for any other format
-      else {
-        date = new Date(dateValue);
-      }
-
-      // Validate the date is valid before formatting
-      if (!isValid(date)) {
-        return "Invalid date";
-      }
-
-      return format(date, formatStr);
+      const dateObj = date instanceof Date ? date : new Date(date);
+      if (isNaN(dateObj.getTime())) return "";
+      const offset = dateObj.getTimezoneOffset();
+      const localDate = new Date(dateObj.getTime() - offset * 60000);
+      return localDate.toISOString().slice(0, 16);
     } catch (error) {
-      console.error("Date formatting error:", error, dateValue);
-      return "Invalid date";
-    }
-  },
-
-  /**
-   * Format a date object or string for API submission (YYYY-MM-DD HH:MM:SS)
-   * @param {Date|string} dateValue - The date to format
-   * @returns {string|null} - MySQL format date string or null
-   */
-  formatForApi(dateValue) {
-    if (!dateValue) return null;
-
-    try {
-      const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
-      if (!isValid(date)) return null;
-
-      // Format specifically for API/MySQL (YYYY-MM-DD HH:MM:SS)
-      return format(date, "yyyy-MM-dd HH:mm:ss");
-    } catch (error) {
-      console.error("API date formatting error:", error, dateValue);
-      return null;
-    }
-  },
-
-  /**
-   * Parse a date string into a Date object handling multiple formats
-   * @param {string} dateStr - Date string to parse
-   * @returns {Date|null} - Date object or null if invalid
-   */
-  parseDate(dateStr) {
-    if (!dateStr) return null;
-
-    try {
-      let date;
-
-      // ISO format (with T separator)
-      if (dateStr.includes("T")) {
-        date = parseISO(dateStr);
-      }
-      // MySQL datetime format
-      else if (dateStr.includes(" ")) {
-        const [datePart, timePart] = dateStr.split(" ");
-        date = parseISO(`${datePart}T${timePart}`);
-      }
-      // Fallback for other formats
-      else {
-        date = new Date(dateStr);
-      }
-
-      return isValid(date) ? date : null;
-    } catch (error) {
-      console.error("Date parsing error:", error, dateStr);
-      return null;
-    }
-  },
-
-  /**
-   * Format a date for input fields (YYYY-MM-DDTHH:MM)
-   * @param {string|Date} dateValue - The date to format
-   * @returns {string} - Formatted date string for HTML datetime-local inputs
-   */
-  formatForInput(dateValue) {
-    if (!dateValue) return "";
-
-    try {
-      const date =
-        dateValue instanceof Date ? dateValue : this.parseDate(dateValue);
-      if (!date || !isValid(date)) return "";
-
-      return format(date, "yyyy-MM-dd'T'HH:mm");
-    } catch (error) {
-      console.error("Input date formatting error:", error, dateValue);
+      console.error("Error formatting date for input:", error);
       return "";
     }
-  },
-};
+  }
+
+  /**
+   * Parses a date string from an input field
+   * @param {string} dateString - The date string to parse
+   * @returns {Date|null} - Date object or null if invalid
+   */
+  static parseDate(dateString) {
+    if (!dateString) return null;
+    try {
+      const date = new Date(dateString);
+      return isNaN(date.getTime()) ? null : date;
+    } catch (error) {
+      console.error("Error parsing date:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Formats a date for API submission
+   * @param {string} inputDate - Date string from input field
+   * @returns {string} - Date string in Y-m-d H:i:s format for Laravel
+   */
+  static formatForApi(inputDate) {
+    if (!inputDate) return null;
+    try {
+      const date = this.parseDate(inputDate);
+      if (!date) return null;
+      // Format as YYYY-MM-DD HH:mm:ss for Laravel
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+      const day = String(date.getUTCDate()).padStart(2, "0");
+      const hours = String(date.getUTCHours()).padStart(2, "0");
+      const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+      const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    } catch (error) {
+      console.error("Error formatting date for API:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Compares two dates to check if they represent the same date and time
+   * @param {string|Date} date1 - First date to compare
+   * @param {string|Date} date2 - Second date to compare
+   * @returns {boolean} - True if dates are effectively equal
+   */
+  static areDatesEqual(date1, date2) {
+    if (!date1 || !date2) return date1 === date2;
+    try {
+      const d1 = date1 instanceof Date ? date1 : new Date(date1);
+      const d2 = date2 instanceof Date ? date2 : new Date(date2);
+      if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return false;
+      d1.setMilliseconds(0);
+      d2.setMilliseconds(0);
+      return d1.getTime() === d2.getTime();
+    } catch (error) {
+      console.error("Error comparing dates:", error);
+      return false;
+    }
+  }
+
+  /**
+   * Checks if the formatted date from the input is different from original API date
+   * @param {string} inputDate - The date from datetime-local input
+   * @param {string} originalApiDate - The original date from the API
+   * @returns {boolean} - True if dates are effectively different
+   */
+  static hasDateChanged(inputDate, originalApiDate) {
+    if (!inputDate || !originalApiDate) return inputDate !== originalApiDate;
+    return this.formatForApi(inputDate) !== originalApiDate;
+  }
+}
