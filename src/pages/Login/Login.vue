@@ -178,12 +178,12 @@ watch([() => data.value.username, () => data.value.password], () => {
 
 <template>
   <div
-    class="min-h-screen bg-gray-100 flex items-center justify-center px-4 sm:px-6 lg:px-8"
+    class="min-h-screen bg-gray-100 flex items-center justify-center px-4 sm:px-6 lg:px-8 overflow-x-hidden overflow-y-auto"
   >
     <!-- Show checking authentication overlay after login attempts -->
     <div
       v-if="isCheckingAuth"
-      class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50"
+      class="fixed inset-0 backdrop-blur-md bg-opacity-50 flex justify-center items-center z-50"
     >
       <div class="bg-white rounded-lg p-8 flex flex-col items-center shadow-lg">
         <div

@@ -1,12 +1,9 @@
-// EditEventModal.vue
 <script setup>
-import { ref, computed, watch } from "vue";
+import { ref, watch, computed } from "vue";
 import { useToast } from "vue-toastification";
 import DateUtils from "@/utils/DateUtils";
-import { useEventStore } from "@/stores/event";
-
-const toast = useToast();
-const eventStore = useEventStore();
+import FlatPickr from "vue-flatpickr-component";
+import "flatpickr/dist/flatpickr.css";
 
 const props = defineProps({
   show: Boolean,
@@ -15,6 +12,8 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["close", "save"]);
+
+const toast = useToast();
 
 const form = ref({
   event_name: "",
@@ -25,380 +24,229 @@ const form = ref({
   description: "",
 });
 
-const originalFormValues = ref({});
 const selectedFile = ref(null);
+const previewUrl = ref("");
 const errors = ref({});
-const hasChanges = ref(false);
 
-const initializeForm = () => {
-  if (props.event) {
-    console.log("Original start date:", props.event.start_date);
-    form.value = {
-      event_name: props.event.event_name || "",
-      venue: props.event.venue || "",
-      event_code: props.event.event_code || "",
-      start_date: DateUtils.formatForInput(props.event.start_date),
-      end_date: DateUtils.formatForInput(props.event.end_date),
-      description: props.event.description || "",
-    };
-    originalFormValues.value = {
-      event_name: props.event.event_name || "",
-      venue: props.event.venue || "",
-      event_code: props.event.event_code || "",
-      start_date: props.event.start_date,
-      end_date: props.event.end_date,
-      description: props.event.description || "",
-    };
-    selectedFile.value = null;
-    hasChanges.value = false;
-  }
+const flatPickrConfig = {
+  enableTime: true,
+  dateFormat: "Y-m-d H:i",
+  time_24hr: false,
+  minuteIncrement: 5,
+  altInput: true,
+  altFormat: "F j, Y h:i K",
+  static: true,
+  position: "auto",
+  disableMobile: true,
 };
+
+const endDateConfig = computed(() => ({
+  ...flatPickrConfig,
+  minDate: form.value.start_date || new Date(),
+}));
 
 watch(
-  form,
-  () => {
-    if (props.event) {
-      hasChanges.value =
-        form.value.event_name !== originalFormValues.value.event_name ||
-        form.value.venue !== originalFormValues.value.venue ||
-        form.value.description !== originalFormValues.value.description ||
-        (form.value.start_date &&
-          DateUtils.formatForApi(form.value.start_date) !==
-            originalFormValues.value.start_date) ||
-        (form.value.end_date &&
-          DateUtils.formatForApi(form.value.end_date) !==
-            originalFormValues.value.end_date) ||
-        selectedFile.value !== null;
-      console.log("Has changes:", hasChanges.value);
+  () => props.event,
+  (event) => {
+    if (event) {
+      form.value = {
+        event_name: event.event_name || "",
+        venue: event.venue || "",
+        event_code: event.event_code || "",
+        start_date: DateUtils.toFlatPickrFormat(event.start_date),
+        end_date: DateUtils.toFlatPickrFormat(event.end_date),
+        description: event.description || "",
+      };
+      previewUrl.value = event.cover_photo
+        ? getImageUrl(event.cover_photo)
+        : "/vsu.png";
+      selectedFile.value = null;
     }
   },
-  { deep: true }
+  { immediate: true }
 );
 
-const isEndDateValid = computed(() => {
-  if (!form.value.start_date || !form.value.end_date) return true;
-  return new Date(form.value.end_date) >= new Date(form.value.start_date);
-});
+function getImageUrl(filePath) {
+  const base = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+  return filePath.startsWith("/storage/")
+    ? `${base}${filePath}`
+    : `${base}/storage/${filePath}`;
+}
 
-const detectChanges = () => {
-  const startChanged = DateUtils.hasDateChanged(
-    form.value.start_date,
-    originalFormValues.value.start_date
-  );
-  const endChanged = DateUtils.hasDateChanged(
-    form.value.end_date,
-    originalFormValues.value.end_date
-  );
+const handleFileChange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-  return (
-    form.value.event_name !== originalFormValues.value.event_name ||
-    form.value.venue !== originalFormValues.value.venue ||
-    form.value.description !== originalFormValues.value.description ||
-    startChanged ||
-    endChanged ||
-    selectedFile.value !== null
-  );
-};
-
-const validateForm = () => {
-  errors.value = {};
-  let isValid = true;
-
-  if (!form.value.event_name) {
-    errors.value.event_name = ["Event name is required"];
-    isValid = false;
-  } else if (form.value.event_name.length > 255) {
-    errors.value.event_name = ["Event name must be 255 characters or less"];
-    isValid = false;
-  }
-
-  if (!form.value.venue) {
-    errors.value.venue = ["Venue is required"];
-    isValid = false;
-  }
-
-  if (form.value.start_date && !DateUtils.parseDate(form.value.start_date)) {
-    errors.value.start_date = ["Invalid start date and time"];
-    isValid = false;
-  }
-
-  if (form.value.end_date && !DateUtils.parseDate(form.value.end_date)) {
-    errors.value.end_date = ["Invalid end date and time"];
-    isValid = false;
-  }
-
-  if (!isEndDateValid.value) {
-    errors.value.end_date = ["End date must be on or after start date"];
-    isValid = false;
-  }
-
-  if (!detectChanges()) {
-    toast.error(
-      "No changes detected. Please modify at least one field before saving.",
-      { timeout: 5000 }
-    );
-    isValid = false;
-  }
-
-  if (form.value.start_date) {
-    const startDate = DateUtils.parseDate(form.value.start_date);
-    if (!startDate || isNaN(startDate.getTime())) {
-      errors.value.start_date = ["Invalid start date"];
-      isValid = false;
-    }
-  }
-
-  if (form.value.end_date) {
-    const endDate = DateUtils.parseDate(form.value.end_date);
-    if (!endDate || isNaN(endDate.getTime())) {
-      errors.value.end_date = ["Invalid end date"];
-      isValid = false;
-    } else if (form.value.start_date) {
-      const startDate = DateUtils.parseDate(form.value.start_date);
-      if (endDate < startDate) {
-        errors.value.end_date = ["End date must be after start date"];
-        isValid = false;
-      }
-    }
-  }
-
-  return isValid;
-};
-
-const handleFileChange = (event) => {
-  const file = event.target.files[0];
-  if (file) {
-    console.log("Selected file:", file);
-    selectedFile.value = file;
-    hasChanges.value = true;
-  }
-};
-
-const submit = async () => {
-  if (!detectChanges()) {
-    toast.info("No changes detected.");
+  const validTypes = ["image/jpeg", "image/png", "image/jpg", "image/gif"];
+  if (!validTypes.includes(file.type)) {
+    toast.error("Invalid image type.");
     return;
   }
 
-  if (!validateForm()) return;
-
-  const formData = new FormData();
-  formData.append("event_name", form.value.event_name || "");
-  formData.append("venue", form.value.venue || "");
-  formData.append("description", form.value.description || "");
-  formData.append("_method", "PATCH");
-
-  const start = DateUtils.formatForApi(form.value.start_date);
-  const end = DateUtils.formatForApi(form.value.end_date);
-
-  if (start) formData.append("start_date", start);
-  if (end) formData.append("end_date", end);
-  if (selectedFile.value) formData.append("cover_photo", selectedFile.value);
-
-  try {
-    const response = await eventStore.updateEvent(
-      props.event.event_id,
-      formData
-    );
-
-    if (!response.success) {
-      toast.info(response.message || "No changes made.");
-      return;
-    }
-
-    toast.success("Event updated successfully!");
-    handleClose();
-  } catch (error) {
-    toast.error("Error occurred while updating the event.");
+  if (file.size > 5 * 1024 * 1024) {
+    toast.error("File must not exceed 5MB.");
+    return;
   }
+
+  selectedFile.value = file;
+  previewUrl.value = URL.createObjectURL(file);
 };
 
 const handleClose = () => {
   errors.value = {};
   selectedFile.value = null;
-  hasChanges.value = false;
-  initializeForm();
   emit("close");
 };
 
-watch(
-  form,
-  () => {
-    if (props.event) {
-      hasChanges.value =
-        (form.value.event_name || "") !==
-          (originalFormValues.value.event_name || "") ||
-        (form.value.venue || "") !== (originalFormValues.value.venue || "") ||
-        (form.value.description || "") !==
-          (originalFormValues.value.description || "") ||
-        (form.value.start_date &&
-          DateUtils.hasDateChanged(
-            form.value.start_date,
-            originalFormValues.value.start_date
-          )) ||
-        (form.value.end_date &&
-          DateUtils.hasDateChanged(
-            form.value.end_date,
-            originalFormValues.value.end_date
-          )) ||
-        selectedFile.value !== null;
-      console.log("Has changes:", hasChanges.value);
-      console.log("Field comparison:", {
-        name: form.value.event_name === originalFormValues.value.event_name,
-        venue: form.value.venue === originalFormValues.value.venue,
-        start: DateUtils.formatForApi(form.value.start_date),
-        originalStart: originalFormValues.value.start_date,
-      });
-    }
-  },
-  { deep: true }
-);
+const handleSubmit = () => {
+  errors.value = {};
+  const formData = new FormData();
+  formData.append("event_name", form.value.event_name || "");
+  formData.append("venue", form.value.venue || "");
+  formData.append("description", form.value.description || "");
+  if (form.value.start_date)
+    formData.append(
+      "start_date",
+      DateUtils.formatForApi(form.value.start_date)
+    );
+  if (form.value.end_date)
+    formData.append("end_date", DateUtils.formatForApi(form.value.end_date));
+  if (selectedFile.value) formData.append("cover_photo", selectedFile.value);
+  formData.append("_method", "PATCH");
+
+  emit("save", formData);
+};
 </script>
 
 <template>
   <div
     v-if="show"
-    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+    class="fixed inset-0 backdrop-blur-md bg-opacity-50 z-50 flex items-center justify-center p-4"
   >
-    <div class="bg-white rounded-lg shadow-xl max-w-lg w-full relative">
+    <div
+      class="bg-white rounded-lg shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto relative p-6 animate-in fade-in-0 zoom-in-95"
+    >
       <button
         @click="handleClose"
-        class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-gray-600 hover:text-gray-800 transition"
-        title="Close"
+        class="absolute top-3 right-3 text-gray-500 hover:text-gray-700 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100"
+        type="button"
       >
-        <i class="fas fa-times text-xl"></i>
+        <i class="fas fa-times"></i>
       </button>
-      <div class="p-6">
-        <h3 class="text-lg font-medium text-gray-900 mb-4">Edit Event</h3>
-        <form @submit.prevent="submit" class="space-y-4">
+
+      <h2 class="text-xl font-bold text-gray-800 mb-4">Edit Event</h2>
+
+      <div class="mb-4">
+        <label class="block text-sm font-medium text-gray-700 mb-2">
+          Cover Photo
+        </label>
+        <div class="mt-2 flex flex-col space-y-2">
+          <input
+            type="file"
+            accept="image/*"
+            @change="handleFileChange"
+            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+          />
+          <div
+            v-if="previewUrl"
+            class="mt-2 max-h-64 overflow-hidden rounded border"
+          >
+            <img
+              :src="previewUrl"
+              alt="Cover Preview"
+              class="w-full h-auto max-h-64 object-contain rounded"
+              @error="(e) => (e.target.src = '/vsu.png')"
+            />
+          </div>
+        </div>
+      </div>
+
+      <form @submit.prevent="handleSubmit" class="space-y-4">
+        <div class="space-y-4">
+          <!-- Event Name -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Event Name</label
-            >
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Event Name *
+            </label>
             <input
               v-model="form.event_name"
               type="text"
-              maxlength="255"
-              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-600"
-              :class="{ 'border-red-500': errors.event_name }"
+              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               required
             />
-            <p v-if="errors.event_name" class="text-red-500 text-xs mt-1">
-              {{ errors.event_name[0] }}
-            </p>
           </div>
+
+          <!-- Venue -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Venue</label
-            >
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Venue
+            </label>
             <input
               v-model="form.venue"
               type="text"
-              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-600"
-              :class="{ 'border-red-500': errors.venue }"
-              required
-            />
-            <p v-if="errors.venue" class="text-red-500 text-xs mt-1">
-              {{ errors.venue[0] }}
-            </p>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Event Code</label
-            >
-            <input
-              :value="form.event_code"
-              type="text"
-              class="w-full border rounded px-3 py-2 bg-gray-100 text-gray-600 cursor-not-allowed"
-              readonly
+              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
             />
           </div>
+
+          <!-- Start Date with FlatPickr -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Start Date & Time</label
-            >
-            <input
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Start Date
+            </label>
+            <FlatPickr
               v-model="form.start_date"
-              type="datetime-local"
-              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-600"
-              :class="{ 'border-red-500': errors.start_date }"
+              :config="flatPickrConfig"
+              @on-change="onStartDateChange"
+              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Select start date and time"
             />
-            <p v-if="errors.start_date" class="text-red-500 text-xs mt-1">
-              {{ errors.start_date[0] }}
-            </p>
           </div>
+
+          <!-- End Date with FlatPickr -->
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >End Date & Time</label
-            >
-            <input
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              End Date
+            </label>
+            <FlatPickr
               v-model="form.end_date"
-              type="datetime-local"
-              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-600"
-              :class="{ 'border-red-500': errors.end_date || !isEndDateValid }"
+              :config="endDateConfig"
+              @on-change="onEndDateChange"
+              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Select end date and time"
             />
-            <p v-if="errors.end_date" class="text-red-500 text-xs mt-1">
-              {{ errors.end_date[0] }}
-            </p>
-            <p v-else-if="!isEndDateValid" class="text-red-500 text-xs mt-1">
-              End date must be on or after start date
-            </p>
           </div>
+
           <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Cover Photo</label
-            >
-            <input
-              type="file"
-              accept="image/*"
-              @change="handleFileChange"
-              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-600"
-            />
-            <p v-if="selectedFile" class="text-green-600 text-xs mt-1">
-              Selected: {{ selectedFile.name }}
-            </p>
-            <p
-              v-else-if="props.event && props.event.cover_photo"
-              class="text-gray-600 text-xs mt-1"
-            >
-              Current: {{ props.event.cover_photo.split("/").pop() }}
-            </p>
-            <p v-if="errors.cover_photo" class="text-red-500 text-xs mt-1">
-              {{ errors.cover_photo[0] }}
-            </p>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Description</label
-            >
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
             <textarea
               v-model="form.description"
-              class="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-600"
+              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               rows="4"
             ></textarea>
-            <p v-if="errors.description" class="text-red-500 text-xs mt-1">
-              {{ errors.description[0] }}
-            </p>
           </div>
-          <div class="flex justify-end space-x-2">
+
+          <div class="flex justify-end gap-3 mt-6">
             <button
               type="button"
               @click="handleClose"
-              class="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 transition"
+              class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              :disabled="loading"
             >
               Cancel
             </button>
             <button
               type="submit"
-              :disabled="loading || !isEndDateValid"
-              class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              :disabled="loading"
+              class="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
-              <span v-if="loading">Saving...</span>
-              <span v-else>Save Changes</span>
+              <i v-if="loading" class="fas fa-spinner fa-spin"></i>
+              {{ loading ? "Saving..." : "Save Changes" }}
             </button>
           </div>
-        </form>
-      </div>
+        </div>
+      </form>
     </div>
   </div>
 </template>

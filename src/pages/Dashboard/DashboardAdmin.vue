@@ -99,44 +99,61 @@ const goToPage = (page) => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-100">
+  <div class="min-h-screen bg-gray-100 overflow-x-hidden overflow-y-auto">
     <Navbar @refresh-dashboard="refreshDashboard" />
     <Sidebar @refresh-dashboard="refreshDashboard" role="admin" />
 
     <div class="transition-all duration-300" :class="layoutShift">
-      <h2 class="text-2xl font-semibold text-green-800 p-6">Events</h2>
-      <Breadcrumbs
-        :items="[
-          { label: 'Home', to: '/admin/dashboard' },
-          { label: 'Dashboard' },
-        ]"
-      />
-
-      <div class="p-6 pt-4">
-        <div
-          class="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 mt-8"
-        >
-          <div class="relative w-full max-w-md">
-            <input
-              type="text"
-              v-model="searchQuery"
-              placeholder="Search intramural..."
-              class="w-full p-3 border rounded-lg focus:outline-none focus:ring-2 focus:ring-green-600 text-sm"
-            />
-            <i
-              class="fas fa-search absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-            ></i>
+      <div class="mt-4 mx-4 rounded-lg">
+        <Breadcrumbs
+          :items="[
+            { label: 'Home', to: '/admin/dashboard' },
+            { label: 'Dashboard' },
+          ]"
+        />
+      </div>
+      <!-- Main Card Container -->
+      <div class="bg-white rounded-lg shadow-md p-6 mt-4 mx-4">
+        <!-- Section Heading -->
+        <div class="flex items-center justify-between p-6 pt-2 pb-0 mx-4 mb-4">
+          <div class="flex items-center space-x-2">
+            <i class="fas fa-calendar-alt text-green-600 text-2xl mb-1"></i>
+            <h2 class="text-2xl font-semibold text-green-800">Events</h2>
           </div>
           <button
             @click="createEvent"
-            class="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none transition-colors w-full md:w-auto max-w-md"
+            class="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
           >
             <i class="fas fa-plus mr-2"></i>
-            Add Intramural
+            Add Event
           </button>
         </div>
-        <EventFilters v-model:filter="filter" />
+        <!-- Filters & Search Card -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+          <div
+            class="flex flex-col md:flex-row justify-between items-center gap-4"
+          >
+            <!-- Filter Button with Icon -->
+            <div class="flex items-center space-x-2 w-full md:w-40">
+              <EventFilters v-model:filter="filter" />
+            </div>
 
+            <!-- Search Bar with Icon -->
+            <div class="relative w-full md:w-300">
+              <i
+                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-green-600"
+              ></i>
+              <input
+                type="text"
+                v-model="searchQuery"
+                placeholder="Search event..."
+                class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-green-600 text-sm"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Content Loader or Events -->
         <div v-if="isLoading || eventStore.loading" class="text-center py-8">
           <i class="fas fa-spinner fa-spin text-2xl text-green-600"></i>
           <p class="text-gray-500 mt-2">Loading events...</p>
@@ -154,30 +171,44 @@ const goToPage = (page) => {
               @remove="eventStore.deleteEvent"
             />
           </div>
+        </div>
+        <!-- Pagination Controls -->
+        <div
+          class="bg-white border border-gray-200 rounded-lg shadow-md p-4 mt-6 mx-4 flex justify-between items-center"
+        >
+          <span class="text-sm text-green-600">
+            Showing {{ (currentPage - 1) * itemsPerPage + 1 }} to
+            {{ (currentPage - 1) * itemsPerPage + paginatedEvents.length }} of
+            {{ totalItems }} results
+          </span>
 
-          <div class="flex justify-between items-center mt-4">
-            <span
-              >Showing {{ (currentPage - 1) * itemsPerPage + 1 }} to
-              {{ (currentPage - 1) * itemsPerPage + paginatedEvents.length }} of
-              {{ totalItems }} results</span
+          <div
+            class="flex items-center border border-gray-200 rounded overflow-hidden shadow-sm"
+          >
+            <!-- Previous Arrow -->
+            <button
+              @click="goToPage(currentPage - 1)"
+              :disabled="currentPage === 1"
+              class="px-3 py-1 bg-white text-green-600 hover:bg-gray-100 disabled:opacity-40"
             >
-            <div class="flex space-x-2">
-              <button
-                @click="goToPage(currentPage - 1)"
-                :disabled="currentPage === 1"
-                class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span class="px-2 py-1">{{ currentPage }}</span>
-              <button
-                @click="goToPage(currentPage + 1)"
-                :disabled="currentPage === totalPages"
-                class="px-2 py-1 bg-gray-200 rounded disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
+              <i class="fas fa-chevron-left"></i>
+            </button>
+
+            <!-- Current Page -->
+            <span
+              class="px-4 py-1.5 bg-green-600 text-white text-sm font-semibold select-none"
+            >
+              {{ currentPage }}
+            </span>
+
+            <!-- Next Arrow -->
+            <button
+              @click="goToPage(currentPage + 1)"
+              :disabled="currentPage === totalPages"
+              class="px-3 py-1 bg-white text-green-600 hover:bg-gray-100 disabled:opacity-40"
+            >
+              <i class="fas fa-chevron-right"></i>
+            </button>
           </div>
         </div>
       </div>

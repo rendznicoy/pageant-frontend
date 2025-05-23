@@ -5,6 +5,8 @@ defineProps({
   candidatesCount: Number,
   judgesCount: Number,
   categoriesCount: Number,
+  activeCategoriesCount: Number,
+  judgesWithPendingScores: Array,
 });
 </script>
 
@@ -23,6 +25,20 @@ defineProps({
       <div class="flex justify-between">
         <span class="text-gray-600">Categories</span>
         <span class="font-medium">{{ categoriesCount || 0 }}</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-gray-600">Active Categories</span>
+        <span class="font-medium">{{ activeCategoriesCount || 0 }}</span>
+      </div>
+      <div class="mt-4">
+        <span class="text-gray-600 font-semibold"
+          >Judges with Pending Scores:</span
+        >
+        <ul class="list-disc list-inside text-sm mt-1">
+          <li v-for="(judge, index) in judgesWithPendingScores" :key="index">
+            {{ judge }}
+          </li>
+        </ul>
       </div>
     </div>
   </div>

@@ -1,11 +1,20 @@
 <script setup>
-import { watch } from "vue";
+import { computed } from "vue";
 
-const emit = defineEmits(["filter-changed"]);
-const filter = defineModel("filter");
+const props = defineProps({
+  filter: String,
+  candidates: {
+    type: Array,
+    default: () => [],
+  },
+});
 
-watch(filter, (newVal) => {
-  emit("filter-changed", newVal);
+const emit = defineEmits(["update:filter"]);
+
+// Extract unique teams from the candidate list
+const teams = computed(() => {
+  const allTeams = props.candidates.map((c) => c.team?.trim()).filter(Boolean);
+  return [...new Set(allTeams)].sort();
 });
 </script>
 
@@ -27,23 +36,20 @@ watch(filter, (newVal) => {
 
     <!-- Dropdown select -->
     <select
-      v-model="filter"
+      :value="filter"
+      @change="emit('update:filter', $event.target.value)"
       class="block w-full appearance-none border border-green-300 rounded-lg pl-10 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600 bg-white hover:bg-green-50"
     >
       <option value="all" class="bg-white hover:bg-green-50 text-gray-700">
-        All Events
-      </option>
-      <option value="active" class="bg-white hover:bg-green-50 text-gray-700">
-        Active
-      </option>
-      <option value="inactive" class="bg-white hover:bg-green-50 text-gray-700">
-        Inactive
+        All Teams
       </option>
       <option
-        value="completed"
+        v-for="team in teams"
+        :key="team"
+        :value="team"
         class="bg-white hover:bg-green-50 text-gray-700"
       >
-        Completed
+        {{ team }}
       </option>
     </select>
   </div>

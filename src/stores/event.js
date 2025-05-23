@@ -33,6 +33,7 @@ export const useEventStore = defineStore("event", () => {
         start_date: event.start_date,
         end_date: event.end_date,
         status: event.status,
+        division: event.division || "standard",
         removed: event.removed || false,
         cover_photo: event.cover_photo,
       }));

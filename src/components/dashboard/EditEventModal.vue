@@ -257,7 +257,7 @@ watch(
 
 <template>
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-md p-4"
   >
     <div
       class="bg-white rounded-xl shadow-lg w-full max-w-xl max-h-full overflow-y-auto p-6 relative animate-in fade-in-0 zoom-in-95"

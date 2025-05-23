@@ -16,16 +16,20 @@ export const useUserStore = defineStore("user", () => {
     try {
       await axiosClient.get("/api/csrf-cookie");
       const res = await axiosClient.get("/api/v1/user");
+
+      // Since you're using UserResource, the user data is under res.data.data
       if (res && res.data) {
-        user.value = res.data;
-        userId.value = res.data.user_id;
-        judgeId.value = res.data.judge_id || null; // Set judgeId if present
+        user.value = res.data.data ?? res.data;
+        userId.value = user.value.user_id;
+        judgeId.value = user.value.judge_id || null;
         return true;
       }
+
+      console.warn("No user data in response");
       return false;
     } catch (err) {
       if (err.response && err.response.status === 401) {
-        console.info("User is not logged in.");
+        console.info("Unauthorized access");
       } else {
         console.error("Error fetching user:", err);
       }
