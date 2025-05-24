@@ -9,11 +9,11 @@ const BACKEND_BASE_URL =
 const props = defineProps({ event: Object });
 const emit = defineEmits(["remove", "edit"]);
 const router = useRouter();
+
 const showMenu = ref(false);
-const isNavigating = ref(false);
-const dropdownRef = ref(null);
 const showDeleteModal = ref(false);
 const isDeleting = ref(false);
+const dropdownRef = ref(null);
 
 const getImageUrl = (coverPhoto) => {
   if (!coverPhoto) return "/vsu.png";
@@ -28,9 +28,7 @@ const handleImageError = (event) => {
 };
 
 function formatDate(dateString) {
-  if (!dateString || isNaN(new Date(dateString).getTime())) {
-    return "Not set";
-  }
+  if (!dateString || isNaN(new Date(dateString).getTime())) return "Not set";
   const options = { year: "numeric", month: "long", day: "numeric" };
   return new Date(dateString).toLocaleDateString(undefined, options);
 }
@@ -51,65 +49,107 @@ function confirmDelete() {
   showDeleteModal.value = true;
 }
 
-onMounted(() => document.addEventListener("click", closeMenu));
-onUnmounted(() => document.removeEventListener("click", closeMenu));
-
 function removeEvent() {
   isDeleting.value = true;
   emit("remove", props.event.event_id);
   showDeleteModal.value = false;
   isDeleting.value = false;
 }
+
+onMounted(() => {
+  document.addEventListener("click", closeMenu);
+});
+onUnmounted(() => {
+  document.removeEventListener("click", closeMenu);
+});
 </script>
 
 <template>
   <div
-    class="bg-white rounded shadow hover:shadow-md transition p-4 relative flex flex-col h-80 z-10"
+    class="bg-white rounded-lg border shadow-md hover:shadow-lg transition p-4 relative flex flex-col h-80 z-10 overflow-hidden"
+    :class="{
+      'border-green-400': event.status === 'active',
+      'border-yellow-400': event.status === 'inactive',
+      'border-gray-400': event.status === 'completed',
+    }"
   >
+    <!-- Cover Photo -->
     <router-link
       :to="`/events/${event.event_id}`"
       class="w-full h-1/2 mb-2 clickable-area"
-      tabindex="0"
     >
       <img
         :src="getImageUrl(event.cover_photo)"
-        :key="'cover-' + event.event_id"
-        :alt="event.event_name ? `${event.event_name} Cover` : 'Event Cover'"
+        :alt="`${event.event_name || 'Event'} Cover`"
         class="h-full w-full object-cover rounded"
         @error="handleImageError"
       />
     </router-link>
 
+    <!-- Details -->
     <div class="w-full flex flex-col justify-between">
       <div class="mb-4">
         <router-link
           :to="`/events/${event.event_id}`"
-          class="flex items-center clickable-area"
+          class="flex flex-wrap items-center justify-between gap-2 clickable-area"
         >
           <div
-            class="text-lg font-semibold text-green-800 hover:underline truncate mr-2"
+            class="text-lg font-semibold text-green-800 hover:underline truncate"
           >
             {{ event.event_name }}
           </div>
-          <div
-            class="text-xs text-white px-2 py-1 rounded inline-flex items-center flex-shrink-0"
-            :class="{
-              'bg-green-400': event.status === 'active',
-              'bg-yellow-400': event.status === 'inactive',
-              'bg-gray-400': event.status === 'completed',
-            }"
-          >
-            <i
-              class="fas mr-1"
+          <div class="flex gap-2">
+            <!-- Status Badge -->
+            <div
+              class="text-xs text-white px-2 py-1 rounded inline-flex items-center"
               :class="{
-                'fa-play': event.status === 'active',
-                'fa-pause': event.status === 'inactive',
-                'fa-check-circle': event.status === 'completed',
+                'bg-green-400': event.status === 'active',
+                'bg-yellow-400': event.status === 'inactive',
+                'bg-gray-400': event.status === 'completed',
               }"
-            ></i>
-            <span>{{
-              event.status.charAt(0).toUpperCase() + event.status.slice(1)
-            }}</span>
+            >
+              <i
+                class="fas mr-1"
+                :class="{
+                  'fa-play': event.status === 'active',
+                  'fa-pause': event.status === 'inactive',
+                  'fa-check-circle': event.status === 'completed',
+                }"
+              ></i>
+              <span>
+                {{
+                  event.status.charAt(0).toUpperCase() + event.status.slice(1)
+                }}
+              </span>
+            </div>
+
+            <!-- Division Badge -->
+            <div
+              v-if="event.division"
+              class="text-xs text-white px-2 py-1 rounded inline-flex items-center"
+              :class="{
+                'bg-indigo-500': event.division === 'standard',
+                'bg-blue-500': event.division === 'male-only',
+                'bg-pink-500': event.division === 'female-only',
+                'bg-gray-400': ![
+                  'standard',
+                  'male-only',
+                  'female-only',
+                ].includes(event.division),
+              }"
+            >
+              <i
+                class="fas mr-1"
+                :class="{
+                  'fa-users': event.division === 'standard',
+                  'fa-mars': event.division === 'male-only',
+                  'fa-venus': event.division === 'female-only',
+                }"
+              ></i>
+              <span class="capitalize">
+                {{ event.division?.replace?.("-", " ") || "Unknown" }}
+              </span>
+            </div>
           </div>
         </router-link>
       </div>
@@ -126,13 +166,10 @@ function removeEvent() {
       </div>
     </div>
 
+    <!-- Dropdown Menu -->
     <div class="absolute bottom-2 right-2">
       <button
         @click.stop="showMenu = !showMenu"
-        @keydown.enter.prevent="showMenu = !showMenu"
-        tabindex="0"
-        aria-haspopup="true"
-        aria-expanded="showMenu"
         class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-200 transition"
       >
         <i class="fas fa-ellipsis-v text-lg text-gray-600"></i>
@@ -140,7 +177,7 @@ function removeEvent() {
       <div
         v-if="showMenu"
         ref="dropdownRef"
-        class="dropdown-menu absolute right-0 bottom-10 w-40 bg-white rounded shadow-md border z-1000"
+        class="dropdown-menu absolute right-0 bottom-10 w-40 bg-white rounded shadow-md border z-50"
       >
         <a
           href="#"
@@ -160,13 +197,15 @@ function removeEvent() {
         </a>
       </div>
     </div>
+
+    <!-- Delete Confirmation Modal -->
+    <DeleteEventModal
+      :show="showDeleteModal"
+      :loading="isDeleting"
+      @close="showDeleteModal = false"
+      @confirm="removeEvent"
+    />
   </div>
-  <DeleteEventModal
-    :show="showDeleteModal"
-    :loading="isDeleting"
-    @close="showDeleteModal = false"
-    @confirm="removeEvent"
-  />
 </template>
 
 <style scoped>

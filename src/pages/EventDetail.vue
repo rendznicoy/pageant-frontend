@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useEventStore } from "@/stores/event";
 import { useSidebarStore } from "@/sidebar";
@@ -21,7 +21,10 @@ import CandidatesTab from "@/components/dashboard/CandidatesTab.vue";
 import JudgesTab from "@/components/dashboard/JudgesTab.vue";
 import CategoriesTab from "@/components/dashboard/CategoriesTab.vue";
 import ResultsTab from "@/components/dashboard/ResultsTab.vue";
+import ScoresTab from "@/components/dashboard/ScoresTab.vue";
 import StageManagementTab from "@/components/dashboard/StageManagementTab.vue";
+import ChangeDivisionModal from "@/components/ui/ChangeDivisionModal.vue";
+import StatisticiansPanel from "@/components/dashboard/StatisticiansPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -32,11 +35,12 @@ const toast = useToast();
 const eventId = route.params.id;
 const event = ref(null);
 const loading = ref(true);
-const activeTab = ref("overview");
+const activeTab = ref(route.query.tab || "overview");
 const showCoverPhotoModal = ref(false);
 const showEditEventModal = ref(false);
 const showResetEventModal = ref(false);
 const showDeleteEventModal = ref(false);
+const showChangeDivisionModal = ref(false);
 const imageTimestamp = ref(Date.now());
 const isLoading = ref(false);
 
@@ -53,7 +57,8 @@ const tabs = computed(() => [
   { id: "candidates", label: "Candidates", disabled: false },
   { id: "judges", label: "Judges", disabled: false },
   { id: "categories", label: "Categories", disabled: false },
-  { id: "results", label: "Results", disabled: true },
+  { id: "scores", label: "Scores", disabled: false },
+  { id: "results", label: "Results", disabled: false },
   {
     id: "stage-management",
     label: "Stage Management",
@@ -80,32 +85,76 @@ const handleTabError = (error) => {
   toast.error("An error occurred in the tab. Please try again.");
 };
 
+const handleChangeDivision = () => {
+  showChangeDivisionModal.value = true;
+};
+
+const handleConfirmDivisionChange = async (newDivision) => {
+  try {
+    isLoading.value = true;
+
+    await axiosClient.patch(`/api/v1/events/${eventId}/division`, {
+      division: newDivision,
+    });
+
+    event.value = await eventStore.fetchEvent(eventId);
+    toast.success(
+      `Division changed to ${newDivision.replace(
+        "-",
+        " "
+      )} and candidates were reset.`
+    );
+  } catch (err) {
+    const errors = err.response?.data?.errors || {};
+    console.error("Change division error:", errors);
+    toast.error(
+      Object.values(errors).flat().join(" ") || "Division update failed."
+    );
+  } finally {
+    showChangeDivisionModal.value = false;
+    isLoading.value = false;
+  }
+};
+
 const updateCoverPhoto = async (file) => {
-  isLoading.value = true;
   const formData = new FormData();
-  formData.append("_method", "PATCH");
-  formData.append("event_id", eventId);
+
   formData.append("cover_photo", file);
+  formData.append("_method", "PATCH");
+
+  formData.append("event_name", event.value?.event_name || "");
+  formData.append("venue", event.value?.venue || "");
+  formData.append(
+    "start_date",
+    new Date(event.value?.start_date)
+      .toISOString()
+      .slice(0, 19)
+      .replace("T", " ")
+  );
+  formData.append(
+    "end_date",
+    new Date(event.value?.end_date).toISOString().slice(0, 19).replace("T", " ")
+  );
+  formData.append("description", event.value?.description || "");
+  formData.append("status", event.value?.status || "inactive");
 
   try {
     await axiosClient.post(`/api/v1/events/${eventId}/edit`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
     });
+
+    toast.success("Cover photo updated successfully.");
     event.value = await eventStore.fetchEvent(eventId);
     imageTimestamp.value = Date.now();
-    toast.success("Cover photo updated successfully!");
-    showCoverPhotoModal.value = false;
+    showCoverPhotoModal.value = false; // ✅ Close modal
   } catch (error) {
-    console.error("Cover photo update error:", error);
-    if (error.response?.data?.errors) {
-      Object.values(error.response.data.errors)
-        .flat()
-        .forEach((message) => toast.error(message));
-    } else {
-      toast.error(error.message || "Failed to update cover photo.");
-    }
-  } finally {
-    isLoading.value = false;
+    console.error(
+      "Cover photo update error:",
+      error.response?.data?.errors || error.message
+    );
+    toast.error("Failed to update cover photo.");
   }
 };
 
@@ -182,13 +231,18 @@ const handleEdit = () => {
 };
 
 const handleViewResults = async () => {
+  if (!event.value || event.value.status !== "completed") {
+    toast.error(
+      "This event has no results yet. It is either inactive or still ongoing."
+    );
+    return;
+  }
+
   try {
     isLoading.value = true;
     const response = await axiosClient.get(
       `/api/v1/events/${eventId}/results/preview`,
-      {
-        responseType: "blob",
-      }
+      { responseType: "blob" }
     );
     const blob = new Blob([response.data], { type: "application/pdf" });
     const url = window.URL.createObjectURL(blob);
@@ -220,11 +274,26 @@ const handleStart = async () => {
 const handleFinalize = async () => {
   try {
     isLoading.value = true;
-    await eventStore.finalizeEvent(eventId);
+
+    const response = await eventStore.finalizeEvent(eventId);
+
     toast.success("Event finalized successfully");
     event.value = await eventStore.fetchEvent(eventId);
   } catch (err) {
-    toast.error(`Failed to finalize event: ${err.message}`);
+    console.error("Finalize error:", err);
+
+    const serverMessage =
+      err?.response?.data?.message ||
+      err?.message ||
+      "An unexpected error occurred";
+
+    if (err.response?.status === 403) {
+      toast.error("You are not authorized to finalize this event.");
+    } else if (err.response?.status === 422) {
+      toast.error("Event cannot be finalized due to missing or invalid data.");
+    } else {
+      toast.error(`${serverMessage}`);
+    }
   } finally {
     isLoading.value = false;
   }
@@ -256,6 +325,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener("resize", updateWindowWidth);
+});
+
+watch(activeTab, (newTab) => {
+  router.replace({ query: { ...route.query, tab: newTab } });
 });
 </script>
 
@@ -294,40 +367,76 @@ onUnmounted(() => {
               </button>
             </div>
             <div class="p-6">
-              <div class="flex items-start justify-between">
-                <div>
-                  <h1 class="text-2xl font-bold text-gray-800">
-                    {{ event.event_name }}
-                  </h1>
-                  <p class="text-gray-500 mt-1">{{ event.event_code }}</p>
-                </div>
-                <div>
-                  <span
-                    class="px-3 py-1 rounded-full text-sm font-medium"
-                    :class="`bg-${statusData.color}-100 text-${statusData.color}-800`"
+              <div
+                class="flex flex-col md:flex-row md:items-center md:justify-between gap-2"
+              >
+                <h1 class="text-2xl font-bold text-gray-800">
+                  {{ event.event_name }}
+                </h1>
+                <div class="flex flex-wrap gap-2 md:justify-end">
+                  <!-- Status Badge -->
+                  <div
+                    class="text-md text-white px-2 py-1 rounded inline-flex items-center"
+                    :class="{
+                      'bg-green-400': event.status === 'active',
+                      'bg-yellow-400': event.status === 'inactive',
+                      'bg-gray-400': event.status === 'completed',
+                    }"
                   >
-                    {{ statusData.label }}
-                  </span>
+                    <i
+                      class="fas mr-1"
+                      :class="{
+                        'fa-play': event.status === 'active',
+                        'fa-pause': event.status === 'inactive',
+                        'fa-check-circle': event.status === 'completed',
+                      }"
+                    ></i>
+                    <span class="capitalize">
+                      {{ event.status }}
+                    </span>
+                  </div>
+
+                  <!-- Division Badge -->
+                  <div
+                    v-if="event.division"
+                    class="text-md text-white px-2 py-1 rounded inline-flex items-center"
+                    :class="{
+                      'bg-indigo-500': event.division === 'standard',
+                      'bg-blue-500': event.division === 'male-only',
+                      'bg-pink-500': event.division === 'female-only',
+                      'bg-gray-400': ![
+                        'standard',
+                        'male-only',
+                        'female-only',
+                      ].includes(event.division),
+                    }"
+                  >
+                    <i
+                      class="fas mr-1"
+                      :class="{
+                        'fa-users': event.division === 'standard',
+                        'fa-mars': event.division === 'male-only',
+                        'fa-venus': event.division === 'female-only',
+                      }"
+                    ></i>
+                    <span class="capitalize">
+                      {{ event.division.replace("-", " ") }}
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <p class="text-sm text-gray-500">Last Accessed</p>
-                  <p class="font-medium">
-                    {{ formatDate(event.last_accessed) }}
-                  </p>
-                </div>
-                <div v-if="event.created_at">
-                  <p class="text-sm text-gray-500">Created On</p>
-                  <p class="font-medium">{{ formatDate(event.created_at) }}</p>
-                </div>
+              <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <p class="text-sm text-gray-500">Start Date</p>
-                  <p class="font-medium">{{ formatDate(event.start_date) }}</p>
+                  <p class="font-medium">
+                    {{ DateUtils.formatDateTime(event.start_date) }}
+                  </p>
                 </div>
                 <div>
                   <p class="text-sm text-gray-500">End Date</p>
-                  <p class="font-medium">{{ formatDate(event.end_date) }}</p>
+                  <p class="font-medium">
+                    {{ DateUtils.formatDateTime(event.end_date) }}
+                  </p>
                 </div>
               </div>
             </div>
@@ -354,12 +463,18 @@ onUnmounted(() => {
             </div>
             <div class="p-6">
               <div v-if="activeTab === 'overview'" class="space-y-6">
-                <EventDescription :description="event.description" />
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <EventDescription :description="event.description" />
+                  <StatisticiansPanel :statisticians="event.statisticians" />
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <EventStats
                     :candidates-count="event.candidates_count"
                     :judges-count="event.judges_count"
                     :categories-count="event.categories_count"
+                    :active-categories="event.active_categories_count"
+                    :pending-judges="event.judges_with_pending_scores"
                   />
                   <EventActions
                     @edit="handleEdit"
@@ -368,6 +483,7 @@ onUnmounted(() => {
                     @start="handleStart"
                     @finalize="handleFinalize"
                     @reset="handleReset"
+                    @change-division="handleChangeDivision"
                   />
                 </div>
               </div>
@@ -387,12 +503,14 @@ onUnmounted(() => {
                 <CandidatesTab
                   v-if="activeTab === 'candidates'"
                   :event-id="eventId"
+                  :division="event.division"
                 />
                 <JudgesTab v-if="activeTab === 'judges'" :event-id="eventId" />
                 <CategoriesTab
                   v-if="activeTab === 'categories'"
                   :event-id="eventId"
                 />
+                <ScoresTab v-if="activeTab === 'scores'" :event-id="eventId" />
                 <ResultsTab
                   v-if="activeTab === 'results'"
                   :event-id="eventId"
@@ -434,6 +552,12 @@ onUnmounted(() => {
       :loading="isLoading"
       @close="showDeleteEventModal = false"
       @confirm="handleConfirmDelete"
+    />
+    <ChangeDivisionModal
+      :show="showChangeDivisionModal"
+      :currentDivision="event?.division"
+      @cancel="showChangeDivisionModal = false"
+      @confirm="handleConfirmDivisionChange"
     />
   </div>
 </template>

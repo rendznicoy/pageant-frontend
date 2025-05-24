@@ -8,6 +8,7 @@ const emit = defineEmits([
   "start",
   "finalize",
   "reset",
+  "change-division",
 ]);
 </script>
 
@@ -15,6 +16,13 @@ const emit = defineEmits([
   <div class="bg-white p-4 rounded border">
     <h3 class="font-medium text-gray-800 mb-4">Actions</h3>
     <div class="space-y-3">
+      <button
+        @click="$emit('change-division')"
+        class="w-full py-2 bg-orange-600 text-white rounded hover:bg-blue-700 transition flex items-center justify-center"
+      >
+        <i class="fas fa-exchange-alt mr-2"></i>
+        Change Division
+      </button>
       <button
         @click="$emit('edit')"
         class="w-full py-2 bg-green-600 text-white rounded hover:bg-green-700 transition flex items-center justify-center"

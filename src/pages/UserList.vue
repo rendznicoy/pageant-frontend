@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRouter } from "vue-router";
 import { useUserStore } from "@/stores/user";
 import { useSidebarStore } from "@/sidebar";
@@ -12,12 +12,14 @@ import CreateUserForm from "@/components/forms/CreateUserForm.vue";
 import EditUserForm from "@/components/forms/EditUserForm.vue";
 import DeleteUserModal from "@/components/forms/DeleteUserModal.vue";
 import UserListSortDropdown from "@/components/ui/UserListSortDropdown.vue";
+import Breadcrumbs from "@/components/layout/Breadcrumbs.vue";
 
 const router = useRouter();
 const userStore = useUserStore();
 const sidebar = useSidebarStore();
 const toast = useToast();
 const { windowWidth } = useWindowSize();
+const searchTerm = ref("");
 
 const users = ref([]);
 const filterRole = ref("");
@@ -25,12 +27,19 @@ const sortField = ref("id"); // Default sort field: ID
 const sortDirection = ref("asc"); // Default direction: ascending
 const serverError = ref("");
 const selectedUsers = ref([]); // Track selected user IDs
+const currentPage = ref(1);
+const itemsPerPage = 8;
+const dropdownVisible = ref(null);
 
 // Create user modal
 const showCreateModal = ref(false);
+const showRoleConfirmModal = ref(false);
+const roleChangeTarget = ref(null);
+const pendingRole = ref(null);
 
 // Edit user modal
 const showEditModal = ref(false);
+
 const editUser = ref({
   user_id: null,
   username: "",
@@ -40,6 +49,12 @@ const editUser = ref({
   role: "",
   password: "",
 });
+
+const breadcrumbItems = [
+  { label: "Home", to: "/admin/dashboard" },
+  { label: "Admin", to: "#" },
+  { label: "Users" },
+];
 
 // Delete confirmation
 const showDeleteConfirm = ref(false);
@@ -90,9 +105,13 @@ const fetchUsers = async () => {
     );
   } catch (error) {
     console.error("Fetch users error:", error);
-    serverError.value =
-      error.response?.data?.message || "Failed to fetch users.";
-    toast.error(serverError.value);
+    if (error.response?.status === 422) {
+      throw error.response.data.errors;
+    } else {
+      const fallbackMessage = error?.message || "Failed to update user.";
+      serverError.value = error.response?.data?.message || fallbackMessage;
+      toast.error(serverError.value);
+    }
   }
 };
 
@@ -102,9 +121,18 @@ const filteredUsers = computed(() => {
 
   let filtered = [...users.value];
 
-  // Apply role filter
   if (filterRole.value) {
     filtered = filtered.filter((user) => user.role === filterRole.value);
+  }
+
+  if (searchTerm.value) {
+    const term = searchTerm.value.toLowerCase();
+    filtered = filtered.filter(
+      (u) =>
+        u.first_name.toLowerCase().includes(term) ||
+        u.last_name.toLowerCase().includes(term) ||
+        u.email.toLowerCase().includes(term)
+    );
   }
 
   // Apply sorting
@@ -137,17 +165,28 @@ const createUser = async (userData) => {
   try {
     const response = await axiosClient.post("/api/v1/users", userData);
     console.log("User created:", response.data);
-    toast.success(response.data.message);
+
+    toast.success(response.data.message || "User created successfully.");
+
+    // Push new user
     users.value.push(response.data.data);
+
+    // ✅ Close the modal
     showCreateModal.value = false;
+
+    return true;
   } catch (error) {
     console.error("Create user error:", error);
     if (error.response?.status === 422) {
-      throw error.response.data.errors;
+      const errs = error.response.data.errors;
+      const firstKey = Object.keys(errs)[0];
+      toast.error(`${firstKey}: ${errs[firstKey][0]}`);
+      throw errs; // Still pass for inline display
     } else {
-      serverError.value =
+      const fallback =
         error.response?.data?.message || "Failed to create user.";
-      toast.error(serverError.value);
+      toast.error(fallback);
+      throw { message: fallback };
     }
   }
 };
@@ -172,24 +211,31 @@ const updateUser = async (userData) => {
   try {
     const payload = { ...userData };
     if (!payload.password) delete payload.password;
+
+    // Remove role if it's judge (to avoid validation error)
+    if (payload.role === "judge") delete payload.role;
+
     const response = await axiosClient.patch(
       `/api/v1/users/${userData.user_id}`,
       payload
     );
-    console.log("User updated:", response.data);
-    toast.success(response.data.message);
+
+    // Safely access response structure
+    if (!response || !response.user) {
+      throw new Error("Invalid response from server");
+    }
+
+    toast.success(response.message || "User updated.");
     const index = users.value.findIndex((u) => u.user_id === userData.user_id);
-    users.value[index] = response.data.user;
+    users.value[index] = response.user;
     showEditModal.value = false;
   } catch (error) {
     console.error("Update user error:", error);
-    if (error.response?.status === 422) {
-      throw error.response.data.errors;
-    } else {
-      serverError.value =
-        error.response?.data?.message || "Failed to update user.";
-      toast.error(serverError.value);
-    }
+    serverError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      "Failed to update user.";
+    toast.error(serverError.value);
   }
 };
 
@@ -333,6 +379,77 @@ const deleteSelected = async () => {
   }
 };
 
+const paginatedUsers = computed(() => {
+  const start = (currentPage.value - 1) * itemsPerPage;
+  return filteredUsers.value.slice(start, start + itemsPerPage).filter(Boolean); // Filter out undefined/null
+});
+
+const totalPages = computed(() =>
+  Math.ceil(filteredUsers.value.length / itemsPerPage)
+);
+
+const goToPage = (page) => {
+  if (page >= 1 && page <= totalPages.value) {
+    currentPage.value = page;
+  }
+};
+
+function handleImageError(event) {
+  event.target.src = "/user24.png";
+}
+
+function toggleRoleDropdown(userId) {
+  dropdownVisible.value = dropdownVisible.value === userId ? null : userId;
+}
+
+function capitalizeRole(role) {
+  if (!role) return "";
+  return role.charAt(0).toUpperCase() + role.slice(1);
+}
+
+function confirmRoleChange(user, role) {
+  dropdownVisible.value = null; // 🔁 Close dropdown first
+  roleChangeTarget.value = user;
+  pendingRole.value = role;
+  showRoleConfirmModal.value = true;
+}
+
+function handleClickOutside(event) {
+  const dropdowns = document.querySelectorAll(".role-dropdown");
+
+  const isInsideAnyDropdown = Array.from(dropdowns).some((dropdown) =>
+    dropdown.contains(event.target)
+  );
+
+  if (!isInsideAnyDropdown) {
+    dropdownVisible.value = null;
+  }
+}
+
+async function updateUserRole() {
+  if (!roleChangeTarget.value || !pendingRole.value) return;
+
+  const updatedUser = {
+    ...roleChangeTarget.value,
+    role: pendingRole.value,
+    password: "", // optional
+  };
+
+  try {
+    await updateUser(updatedUser);
+    toast.success("User role updated.");
+
+    // 🔁 Reset UI states
+    dropdownVisible.value = null;
+    showRoleConfirmModal.value = false;
+    roleChangeTarget.value = null;
+    pendingRole.value = null;
+  } catch (error) {
+    console.error("Role update failed:", error);
+    toast.error("Failed to update user role.");
+  }
+}
+
 // Check authentication
 onMounted(async () => {
   if (!userStore.isAuthenticated) {
@@ -348,17 +465,33 @@ onMounted(async () => {
     }
   }
   await fetchUsers();
+  document.addEventListener("click", handleClickOutside);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", handleClickOutside);
 });
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-100">
+  <div class="min-h-screen bg-gray-100 overflow-auto">
     <Navbar />
     <Sidebar />
+
     <div class="transition-all duration-300" :class="layoutShift">
-      <div class="p-6 max-w-7xl mx-auto">
-        <div class="flex justify-between items-center mb-6">
-          <h1 class="text-2xl font-bold text-gray-800">User Management</h1>
+      <!-- Breadcrumbs -->
+      <div class="mt-4 mx-4 rounded-lg">
+        <Breadcrumbs :items="breadcrumbItems" />
+      </div>
+
+      <!-- Main Card -->
+      <div class="bg-white rounded-lg shadow-md p-6 mt-4 mx-4">
+        <!-- Header -->
+        <div class="flex justify-between items-center pt-2 pb-0 mb-4">
+          <div class="flex items-center space-x-2">
+            <i class="fas fa-users text-green-600 text-2xl mb-1"></i>
+            <h1 class="text-lg font-bold text-green-800">User Management</h1>
+          </div>
           <div class="flex space-x-2">
             <button
               v-if="selectedUsers.length"
@@ -387,145 +520,273 @@ onMounted(async () => {
           <span class="block sm:inline">{{ serverError }}</span>
         </div>
 
-        <!-- User List -->
-        <div class="bg-white p-6 rounded-lg shadow-md">
-          <div class="flex justify-between items-center mb-4 space-x-4">
-            <h2 class="text-xl font-semibold text-gray-800">Users</h2>
-            <div class="flex items-center space-x-4">
-              <UserListSortDropdown
-                v-model="sortField"
-                v-model:direction="sortDirection"
-              />
-              <div>
+        <!-- Filters and Search -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+          <div
+            class="flex flex-col md:flex-row justify-between items-center gap-4"
+          >
+            <!-- Filters -->
+            <div class="flex items-center space-x-2 w-full md:w-40">
+              <div
+                class="relative w-full max-w-xs overflow-x-auto overflow-y-auto"
+              >
+                <!-- Left filter icon -->
+                <div
+                  class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+                >
+                  <i class="fas fa-filter text-green-600 text-sm"></i>
+                </div>
+
+                <!-- Right chevron icon -->
+                <div
+                  class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+                >
+                  <i class="fas fa-chevron-down text-green-600 text-sm"></i>
+                </div>
+
+                <!-- Dropdown select -->
                 <select
                   v-model="filterRole"
                   @change="fetchUsers"
-                  class="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+                  class="block w-full appearance-none border border-green-300 rounded-lg pl-10 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600 bg-white hover:bg-green-50"
                 >
-                  <option value="">Show All Roles</option>
-                  <option value="admin">Admin</option>
-                  <option value="tabulator">Tabulator</option>
+                  <option
+                    value=""
+                    class="bg-white hover:bg-green-50 text-gray-700"
+                  >
+                    All Roles
+                  </option>
+                  <option
+                    value="admin"
+                    class="bg-white hover:bg-green-50 text-gray-700"
+                  >
+                    Admin
+                  </option>
+                  <option
+                    value="tabulator"
+                    class="bg-white hover:bg-green-50 text-gray-700"
+                  >
+                    Tabulator
+                  </option>
+                  <option
+                    value="judge"
+                    class="bg-white hover:bg-green-50 text-gray-700"
+                  >
+                    Judge
+                  </option>
                 </select>
               </div>
             </div>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-              <thead class="bg-gray-50">
-                <tr>
-                  <th class="px-6 py-3">
-                    <div class="flex justify-center items-center">
-                      <input
-                        type="checkbox"
-                        v-model="allSelected"
-                        :indeterminate="someSelected && !allSelected"
-                        class="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                      />
-                    </div>
-                  </th>
-                  <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    ID
-                  </th>
-                  <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    Name
-                  </th>
-                  <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    Email
-                  </th>
-                  <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    Username
-                  </th>
-                  <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    Role
-                  </th>
-                  <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                  >
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="bg-white divide-y divide-gray-200">
-                <tr v-if="filteredUsers.length === 0">
-                  <td
-                    colspan="7"
-                    class="px-6 py-4 text-center text-sm text-gray-500"
-                  >
-                    No users found.
-                  </td>
-                </tr>
-                <tr v-else v-for="user in filteredUsers" :key="user.user_id">
-                  <td class="px-6 py-4">
-                    <div class="flex justify-center items-center">
-                      <input
-                        type="checkbox"
-                        v-model="selectedUsers"
-                        :value="user.user_id"
-                        class="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                      />
-                    </div>
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {{ user.user_id }}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {{ user.first_name }} {{ user.last_name }}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {{ user.email }}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {{ user.username }}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                    {{ user.role }}
-                  </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <button
-                      @click="openEditModal(user)"
-                      class="text-blue-600 hover:text-blue-900 mr-4"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      @click="confirmDelete(user)"
-                      class="text-red-600 hover:text-red-900"
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+
+            <!-- Search -->
+            <div class="relative w-full md:w-300">
+              <i
+                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-green-600"
+              ></i>
+              <input
+                v-model="searchTerm"
+                type="search"
+                placeholder="Search by name or email"
+                class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-green-600 text-sm"
+              />
+            </div>
           </div>
         </div>
 
-        <!-- Create User Modal -->
+        <!-- User List Card Grid -->
+        <div class="overflow-x-auto">
+          <div
+            class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"
+          >
+            <div
+              v-for="user in paginatedUsers"
+              :key="user?.user_id"
+              class="bg-white rounded-lg border border-gray-200 shadow-md p-4 flex flex-col relative hover:shadow-lg transition"
+              name="card"
+            >
+              <!-- delete icon -->
+              <div class="absolute top-2 right-2">
+                <button @click="confirmDelete(user)">
+                  <i class="fas fa-trash text-red-500 hover:text-red-700"></i>
+                </button>
+              </div>
+
+              <!-- profile image -->
+              <div class="mb-4 flex justify-center">
+                <img
+                  :src="user.profile_photo || '/user24.png'"
+                  alt="Profile"
+                  class="w-16 h-16 rounded-full object-cover border-2 border-green-500 shadow-sm"
+                  @error="handleImageError"
+                />
+              </div>
+              <!-- Name -->
+              <h3 class="text-lg font-semibold text-center mb-2">
+                {{ user.first_name }} {{ user.last_name }}
+              </h3>
+              <!-- Email -->
+              <div
+                class="flex items-center justify-start text-sm text-gray-600 mb-1"
+              >
+                <i class="fas fa-envelope mr-2 text-green-600"></i>
+                <span class="truncate">{{ user.email }}</span>
+              </div>
+              <!-- Username -->
+              <div
+                class="flex items-center justify-start text-xs text-gray-500 mb-3"
+              >
+                <i class="fas fa-user mr-2 text-green-600"></i>
+                <span class="truncate">{{ user.username }}</span>
+              </div>
+
+              <!-- Centered Role dropdown -->
+              <div
+                class="relative mt-2 w-full flex justify-center role-dropdown"
+              >
+                <button
+                  class="inline-flex items-center justify-center px-3 py-1 text-sm font-medium rounded-full transition"
+                  :class="{
+                    'bg-green-100 text-green-800 hover:bg-green-200':
+                      user.role !== 'judge',
+                    'bg-gray-100 text-gray-500 cursor-not-allowed':
+                      user.role === 'judge',
+                  }"
+                  :disabled="user.role === 'judge'"
+                  @click="
+                    user.role !== 'judge' && toggleRoleDropdown(user.user_id)
+                  "
+                >
+                  <i
+                    class="fas mr-2"
+                    :class="{
+                      'fa-user-shield': user.role === 'admin',
+                      'fa-user-cog': user.role === 'tabulator',
+                      'fa-user': user.role === 'judge',
+                    }"
+                  ></i>
+                  {{ capitalizeRole(user.role) }}
+                  <i
+                    v-if="user.role !== 'judge'"
+                    class="fas fa-caret-down ml-2 text-xs"
+                  ></i>
+                </button>
+
+                <!-- Role Options -->
+                <div
+                  v-if="dropdownVisible === user.user_id"
+                  class="absolute z-10 mt-2 w-40 bg-white border border-gray-200 rounded shadow-lg"
+                >
+                  <button
+                    v-for="option in ['admin', 'tabulator']"
+                    :key="option"
+                    :disabled="user.role === option"
+                    class="flex items-center w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-green-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    @click.prevent="confirmRoleChange(user, option)"
+                  >
+                    <i
+                      class="fas mr-2"
+                      :class="{
+                        'fa-user-shield': option === 'admin',
+                        'fa-user-cog': option === 'tabulator',
+                      }"
+                    ></i>
+                    {{ capitalizeRole(option) }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div
+          class="bg-white border border-gray-200 rounded-lg shadow-md p-4 mt-6 mx-4 flex justify-between items-center"
+        >
+          <span class="text-sm text-green-600">
+            Showing {{ (currentPage - 1) * itemsPerPage + 1 }} to
+            {{
+              Math.min(
+                (currentPage - 1) * itemsPerPage + paginatedUsers.length,
+                filteredUsers.length
+              )
+            }}
+            of {{ filteredUsers.length }} results
+          </span>
+
+          <div
+            class="flex items-center border border-gray-200 rounded overflow-hidden shadow-sm"
+          >
+            <button
+              @click="goToPage(currentPage - 1)"
+              :disabled="currentPage === 1"
+              class="px-3 py-1 bg-white text-green-600 hover:bg-gray-100 disabled:opacity-40"
+            >
+              <i class="fas fa-chevron-left"></i>
+            </button>
+
+            <span
+              class="px-4 py-1.5 bg-green-600 text-white text-sm font-semibold select-none"
+            >
+              {{ currentPage }}
+            </span>
+
+            <button
+              @click="goToPage(currentPage + 1)"
+              :disabled="currentPage === totalPages"
+              class="px-3 py-1 bg-white text-green-600 hover:bg-gray-100 disabled:opacity-40"
+            >
+              <i class="fas fa-chevron-right"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Role Change Confirmation Modal -->
+        <div
+          v-if="showRoleConfirmModal"
+          class="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-center justify-center"
+        >
+          <div class="bg-white p-6 rounded-lg shadow-md w-full max-w-md">
+            <h3 class="text-lg font-bold text-gray-800 mb-4">
+              Confirm Role Change
+            </h3>
+            <p class="text-sm text-gray-700 mb-6">
+              Are you sure you want to change the role of
+              <strong>
+                {{ roleChangeTarget?.first_name }}
+                {{ roleChangeTarget?.last_name }}
+              </strong>
+              to <strong class="capitalize">{{ pendingRole }}</strong
+              >?
+            </p>
+            <div class="flex justify-end gap-3">
+              <button
+                @click="showRoleConfirmModal = false"
+                class="px-4 py-2 text-sm bg-gray-300 hover:bg-gray-400 rounded"
+              >
+                Cancel
+              </button>
+              <button
+                @click="updateUserRole"
+                class="px-4 py-2 text-sm bg-green-600 text-white hover:bg-green-700 rounded"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modals (no changes) -->
         <CreateUserForm
           v-if="showCreateModal"
           @submit="createUser"
           @cancel="showCreateModal = false"
         />
-
-        <!-- Edit User Modal -->
         <EditUserForm
           v-if="showEditModal"
           :user="editUser"
           @submit="updateUser"
           @cancel="showEditModal = false"
         />
-
-        <!-- Delete Confirmation Modal -->
         <DeleteUserModal
           v-if="showDeleteConfirm"
           :user="userToDelete"
@@ -544,5 +805,15 @@ table {
 th,
 td {
   text-align: left;
+}
+
+.card-enter-active,
+.card-leave-active {
+  transition: all 0.3s ease;
+}
+.card-enter-from,
+.card-leave-to {
+  opacity: 0;
+  transform: scale(0.95);
 }
 </style>

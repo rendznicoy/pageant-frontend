@@ -3,7 +3,7 @@ import router from "./router.js";
 
 const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_BACKEND_URL || "http://localhost:8000",
-  withCredentials: true,
+  withCredentials: true, // default for most requests
   withXSRFToken: true,
   headers: {
     "X-Requested-With": "XMLHttpRequest",
@@ -24,8 +24,17 @@ const fetchCsrfToken = async () => {
 };
 
 axiosClient.interceptors.request.use(async (config) => {
-  // Fetch CSRF token for non-GET requests if not present
-  if (["post", "put", "patch", "delete"].includes(config.method)) {
+  // Disable withCredentials if session is a judge token-based session
+  if (localStorage.getItem("judgeSession") === "true") {
+    config.withCredentials = false;
+  }
+
+  // Fetch CSRF token for unsafe requests if not already present
+  if (
+    config?.method &&
+    ["post", "put", "patch", "delete"].includes(config.method) &&
+    localStorage.getItem("judgeSession") !== "true"
+  ) {
     const xsrfToken = document.cookie
       .split("; ")
       .find((row) => row.startsWith("XSRF-TOKEN="))
@@ -36,12 +45,11 @@ axiosClient.interceptors.request.use(async (config) => {
   }
 
   const token = localStorage.getItem("token");
-  console.log("Token in localStorage:", token);
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    axiosClient.defaults.headers.common["Authorization"] = `Bearer ${token}`;
     console.log("Added token to request:", token, "URL:", config.url);
   } else {
-    console.warn("No token found for request:", config.url);
+    console.warn("No token found for request:", config.url ?? "unknown URL");
   }
 
   if (config.data instanceof FormData) {
@@ -55,32 +63,41 @@ axiosClient.interceptors.request.use(async (config) => {
     }
   }
 
-  const xsrfToken = document.cookie
-    .split("; ")
-    .find((row) => row.startsWith("XSRF-TOKEN="))
-    ?.split("=")[1];
-  if (xsrfToken) {
-    config.headers["X-XSRF-TOKEN"] = decodeURIComponent(xsrfToken);
-    console.log("Added XSRF-TOKEN to request:", xsrfToken);
-  } else {
-    console.warn("No XSRF-TOKEN found in cookies for request:", config.url);
+  if (
+    config.url !== "/api/v1/login/judge" &&
+    config.withCredentials !== false &&
+    localStorage.getItem("judgeSession") !== "true"
+  ) {
+    const xsrfToken = document.cookie
+      .split("; ")
+      .find((row) => row.startsWith("XSRF-TOKEN="))
+      ?.split("=")[1];
+    if (xsrfToken) {
+      config.headers["X-XSRF-TOKEN"] = decodeURIComponent(xsrfToken);
+      console.log("Added XSRF-TOKEN to request:", xsrfToken);
+    }
   }
 
   return config;
 });
 
 axiosClient.interceptors.response.use(
-  (response) => response.data, // ✅ Return only the .data part
+  (response) => {
+    const contentType = response.headers?.["content-type"] ?? "";
+
+    if (
+      contentType.includes("application/octet-stream") ||
+      contentType.includes("text/csv")
+    ) {
+      return response; // for file downloads
+    }
+
+    return response.data; // Default for API responses
+  },
   (error) => {
     if (error.response?.status === 401) {
-      console.error("Unauthorized request", {
-        url: error.config?.url,
-        method: error.config?.method,
-        headers: error.config?.headers,
-        data: error.config?.data,
-        response: error.response?.data,
-      });
       localStorage.removeItem("token");
+      localStorage.removeItem("judgeSession");
       router.push({ name: "Login" });
       return Promise.resolve();
     }

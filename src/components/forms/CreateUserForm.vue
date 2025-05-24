@@ -20,8 +20,9 @@ const newUser = ref({
   password_confirmation: "",
   first_name: "",
   last_name: "",
-  role: "admin",
+  role: "admin", // ← restored default
 });
+
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
 const formErrors = ref({});
@@ -62,7 +63,9 @@ const validateField = (field, value) => {
         return "Last name can only contain letters.";
       return "";
     case "role":
-      if (!["admin", "tabulator"].includes(value)) return "Invalid role.";
+      if (!value) return "Role is required.";
+      if (!["admin", "tabulator"].includes(value))
+        return "Invalid role selected.";
       return "";
     default:
       return "";
@@ -72,19 +75,31 @@ const validateField = (field, value) => {
 // Check required fields
 const checkRequiredFields = () => {
   const requiredFields = [
-    { key: "username", label: "Username" },
-    { key: "email", label: "Email" },
-    { key: "password", label: "Password" },
-    { key: "first_name", label: "First Name" },
-    { key: "last_name", label: "Last Name" },
+    "username",
+    "email",
+    "password",
+    "password_confirmation",
+    "first_name",
+    "last_name",
   ];
-  const missingFields = requiredFields.filter(
-    (field) => !newUser.value[field.key]
-  );
-  missingFields.forEach((field) => {
-    toast.error(`${field.label}: This field is required`);
+
+  let missing = false;
+
+  requiredFields.forEach((key) => {
+    if (!newUser.value[key]) {
+      formErrors.value[key] = `${key.replace(/_/g, " ")} is required.`;
+      missing = true;
+    } else {
+      formErrors.value[key] = "";
+    }
   });
-  return missingFields.length === 0;
+
+  if (missing) {
+    toast.error("Please fill in all required fields.");
+    return false;
+  }
+
+  return true;
 };
 
 // Validate all fields
@@ -120,19 +135,28 @@ const toggleConfirmPassword = () => {
 
 // Submit form
 const submitForm = async () => {
-  if (!checkRequiredFields()) {
-    validateForm();
+  // Manually validate each required field first
+  Object.keys(newUser.value).forEach((key) => {
+    formErrors.value[key] = validateField(key, newUser.value[key]);
+  });
+
+  const hasErrors = Object.values(formErrors.value).some((msg) => !!msg);
+  const anyMissing = Object.values(newUser.value).some((v) => !v);
+
+  if (anyMissing || hasErrors) {
+    toast.error("Please fill in all required fields.");
     return;
   }
-  if (!validateForm()) {
-    toast.error("Please fix form errors before submitting.");
-    return;
-  }
+
   try {
-    await emit("submit", newUser.value);
-    resetForm();
-  } catch (errors) {
-    formErrors.value = errors;
+    await emit("submit", { ...newUser.value });
+  } catch (serverErrors) {
+    if (typeof serverErrors === "object") {
+      formErrors.value = serverErrors;
+      toast.error("Validation failed.");
+    } else {
+      toast.error("Unexpected error.");
+    }
   }
 };
 
@@ -154,210 +178,144 @@ const resetForm = () => {
 
 // Computed property to disable submit button
 const isSubmitDisabled = computed(() => {
+  const required = [
+    "username",
+    "email",
+    "password",
+    "password_confirmation",
+    "first_name",
+    "last_name",
+    "role",
+  ];
   return (
-    Object.values(formErrors.value).some((error) => error) ||
-    !newUser.value.username ||
-    !newUser.value.email ||
-    !newUser.value.password ||
-    !newUser.value.first_name ||
-    !newUser.value.last_name
+    required.some((key) => !newUser.value[key]) ||
+    Object.values(formErrors.value).some((err) => !!err)
   );
 });
 </script>
 
 <template>
   <div
-    class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+    class="fixed inset-0 z-50 backdrop-blur-md flex items-center justify-center"
   >
-    <div class="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full relative">
+    <div
+      class="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full relative max-h-[90vh] overflow-y-auto"
+    >
       <button
         @click="
-          emit('cancel');
-          resetForm();
+          () => {
+            emit('cancel');
+            resetForm();
+          }
         "
-        class="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-xl font-bold"
+        class="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-xl font-bold z-70"
         aria-label="Close"
       >
         <i class="fas fa-times text-4xl mr-2"></i>
       </button>
-      <h2 class="text-xl font-semibold text-gray-800 mb-4">Create New User</h2>
-      <form @submit.prevent="submitForm" class="space-y-4">
-        <div class="relative">
-          <label class="block text-sm font-medium text-gray-700"
-            >Username</label
-          >
+
+      <!-- Title -->
+      <h2 class="text-2xl font-bold text-green-800 mb-6">Create New User</h2>
+
+      <!-- Form -->
+      <form @submit.prevent="submitForm" class="space-y-5">
+        <!-- Input Field Component -->
+        <div
+          v-for="(label, key) in {
+            username: 'Username',
+            email: 'Email',
+            password: 'Password',
+            password_confirmation: 'Confirm Password',
+            first_name: 'First Name',
+            last_name: 'Last Name',
+          }"
+          :key="key"
+        >
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{
+            label
+          }}</label>
           <div class="relative">
-            <i class="fas fa-user absolute left-3 top-4 text-gray-500"></i>
+            <i
+              class="fas absolute left-3 top-3 text-gray-400"
+              :class="{
+                'fa-user':
+                  key === 'username' ||
+                  key === 'first_name' ||
+                  key === 'last_name',
+                'fa-envelope': key === 'email',
+                'fa-lock': key === 'password',
+                'fa-check': key === 'password_confirmation',
+              }"
+            ></i>
             <input
-              v-model="newUser.username"
-              type="text"
-              class="mt-1 block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              required
-              @input="handleInput('username')"
+              :type="
+                (key === 'password' && !showPassword) ||
+                (key === 'password_confirmation' && !showConfirmPassword)
+                  ? 'password'
+                  : 'text'
+              "
+              v-model="newUser[key]"
+              @input="handleInput(key)"
+              class="block w-full pl-10 pr-10 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-green-600 focus:outline-none border-gray-300"
+              :placeholder="label"
             />
-          </div>
-          <p
-            v-if="formErrors.username || errors.username"
-            class="mt-1 text-sm text-red-600"
-          >
-            {{ formErrors.username || (errors.username && errors.username[0]) }}
-          </p>
-        </div>
-        <div class="relative">
-          <label class="block text-sm font-medium text-gray-700">Email</label>
-          <div class="relative">
-            <i class="fas fa-envelope absolute left-3 top-4 text-gray-500"></i>
-            <input
-              v-model="newUser.email"
-              type="email"
-              class="mt-1 block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              required
-              @input="handleInput('email')"
-            />
-          </div>
-          <p
-            v-if="formErrors.email || errors.email"
-            class="mt-1 text-sm text-red-600"
-          >
-            {{ formErrors.email || (errors.email && errors.email[0]) }}
-          </p>
-        </div>
-        <div class="relative">
-          <label class="block text-sm font-medium text-gray-700"
-            >Password</label
-          >
-          <div class="relative">
-            <i class="fas fa-lock absolute left-3 top-4 text-gray-500"></i>
-            <input
-              v-model="newUser.password"
-              :type="showPassword ? 'text' : 'password'"
-              class="mt-1 block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              required
-              @input="handleInput('password')"
-            />
+            <!-- Toggle Visibility -->
             <button
+              v-if="key === 'password' || key === 'password_confirmation'"
               type="button"
-              @click="togglePassword"
-              class="absolute right-3 top-3 text-gray-500 hover:text-gray-700"
-              aria-label="Toggle password visibility"
-            >
-              <i :class="showPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
-            </button>
-          </div>
-          <p
-            v-if="formErrors.password || errors.password"
-            class="mt-1 text-sm text-red-600"
-          >
-            {{ formErrors.password || (errors.password && errors.password[0]) }}
-          </p>
-        </div>
-        <div class="relative">
-          <label class="block text-sm font-medium text-gray-700"
-            >Confirm Password</label
-          >
-          <div class="relative">
-            <i class="fas fa-check absolute left-3 top-4 text-gray-500"></i>
-            <input
-              v-model="newUser.password_confirmation"
-              :type="showConfirmPassword ? 'text' : 'password'"
-              class="mt-1 block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              required
-              @input="handleInput('password_confirmation')"
-            />
-            <button
-              type="button"
-              @click="toggleConfirmPassword"
-              class="absolute right-3 top-3 text-gray-500 hover:text-gray-700"
-              aria-label="Toggle confirm password visibility"
+              class="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+              @click="
+                key === 'password' ? togglePassword() : toggleConfirmPassword()
+              "
             >
               <i
-                :class="showConfirmPassword ? 'fas fa-eye-slash' : 'fas fa-eye'"
+                :class="
+                  (key === 'password' ? showPassword : showConfirmPassword)
+                    ? 'fas fa-eye-slash'
+                    : 'fas fa-eye'
+                "
               ></i>
             </button>
           </div>
           <p
-            v-if="
-              formErrors.password_confirmation || errors.password_confirmation
-            "
-            class="mt-1 text-sm text-red-600"
+            v-if="formErrors[key] || errors[key]"
+            class="text-sm text-red-600 mt-1"
           >
-            {{
-              formErrors.password_confirmation ||
-              (errors.password_confirmation && errors.password_confirmation[0])
-            }}
+            {{ formErrors[key] || (errors[key] && errors[key][0]) }}
           </p>
         </div>
-        <div class="relative">
-          <label class="block text-sm font-medium text-gray-700"
-            >First Name</label
+
+        <!-- Role Selection -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1"
+            >Role</label
           >
           <div class="relative">
-            <i class="fas fa-user absolute left-3 top-4 text-gray-500"></i>
-            <input
-              v-model="newUser.first_name"
-              type="text"
-              class="mt-1 block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              required
-              @input="handleInput('first_name')"
-            />
-          </div>
-          <p
-            v-if="formErrors.first_name || errors.first_name"
-            class="mt-1 text-sm text-red-600"
-          >
-            {{
-              formErrors.first_name ||
-              (errors.first_name && errors.first_name[0])
-            }}
-          </p>
-        </div>
-        <div class="relative">
-          <label class="block text-sm font-medium text-gray-700"
-            >Last Name</label
-          >
-          <div class="relative">
-            <i class="fas fa-user absolute left-3 top-4 text-gray-500"></i>
-            <input
-              v-model="newUser.last_name"
-              type="text"
-              class="mt-1 block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
-              required
-              @input="handleInput('last_name')"
-            />
-          </div>
-          <p
-            v-if="formErrors.last_name || errors.last_name"
-            class="mt-1 text-sm text-red-600"
-          >
-            {{
-              formErrors.last_name || (errors.last_name && errors.last_name[0])
-            }}
-          </p>
-        </div>
-        <div class="relative">
-          <label class="block text-sm font-medium text-gray-700">Role</label>
-          <div class="relative">
-            <i class="fas fa-user-tag absolute left-3 top-3 text-gray-500"></i>
+            <i class="fas fa-user-tag absolute left-3 top-3 text-gray-400"></i>
             <select
               v-model="newUser.role"
-              class="mt-1 block w-full pl-10 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
               @input="handleInput('role')"
+              class="block w-full pl-10 pr-4 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-green-600 focus:outline-none border-gray-300"
             >
+              <option disabled value="">Select Role</option>
+              <!-- ⬅️ Add this -->
               <option value="admin">Admin</option>
               <option value="tabulator">Tabulator</option>
             </select>
           </div>
           <p
             v-if="formErrors.role || errors.role"
-            class="mt-1 text-sm text-red-600"
+            class="text-sm text-red-600 mt-1"
           >
             {{ formErrors.role || (errors.role && errors.role[0]) }}
           </p>
         </div>
+
+        <!-- Submit -->
         <div class="flex justify-end">
           <button
             type="submit"
-            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+            class="px-5 py-2 bg-green-600 text-white font-medium rounded-md shadow hover:bg-green-700 transition"
             :disabled="isSubmitDisabled"
           >
             Create User

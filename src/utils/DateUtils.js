@@ -1,8 +1,24 @@
-// DateUtils.js
-/**
- * Utility class for handling date formatting and parsing throughout the application
- */
 export default class DateUtils {
+  /**
+   * Formats a date into a readable format like "May 22, 2025"
+   * @param {string|Date} date - The date to format
+   * @returns {string} - Formatted date string
+   */
+  static formatDate(date) {
+    if (!date) return "";
+    try {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    } catch (error) {
+      console.error("Error formatting readable date:", error);
+      return "";
+    }
+  }
   /**
    * Formats a date string for display in input[type="datetime-local"] fields
    * @param {string|Date} date - The date to format (ISO string or Date object)
@@ -48,13 +64,15 @@ export default class DateUtils {
     try {
       const date = this.parseDate(inputDate);
       if (!date) return null;
-      // Format as YYYY-MM-DD HH:mm:ss for Laravel
-      const year = date.getUTCFullYear();
-      const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-      const day = String(date.getUTCDate()).padStart(2, "0");
-      const hours = String(date.getUTCHours()).padStart(2, "0");
-      const minutes = String(date.getUTCMinutes()).padStart(2, "0");
-      const seconds = String(date.getUTCSeconds()).padStart(2, "0");
+
+      // Format as YYYY-MM-DD HH:mm:ss using local time
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const hours = String(date.getHours()).padStart(2, "0");
+      const minutes = String(date.getMinutes()).padStart(2, "0");
+      const seconds = String(date.getSeconds()).padStart(2, "0");
+
       return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     } catch (error) {
       console.error("Error formatting date for API:", error);
@@ -92,5 +110,53 @@ export default class DateUtils {
   static hasDateChanged(inputDate, originalApiDate) {
     if (!inputDate || !originalApiDate) return inputDate !== originalApiDate;
     return this.formatForApi(inputDate) !== originalApiDate;
+  }
+
+  /**
+   * Formats a date string for use with FlatPickr (Y-m-d H:i)
+   * @param {string|Date} date - The input date string or object
+   * @returns {string} - Formatted date string like "2025-05-22 14:30"
+   */
+  static toFlatPickrFormat(date) {
+    if (!date) return "";
+    try {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return "";
+
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      const hours = String(d.getHours()).padStart(2, "0");
+      const minutes = String(d.getMinutes()).padStart(2, "0");
+
+      return `${year}-${month}-${day} ${hours}:${minutes}`;
+    } catch (error) {
+      console.error("Error formatting date for FlatPickr:", error);
+      return "";
+    }
+  }
+
+  /**
+   * Formats a date into "May 22, 2025 at 03:45 PM"
+   * @param {string|Date} date
+   * @returns {string}
+   */
+  static formatDateTime(date) {
+    if (!date) return "";
+    try {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+      });
+    } catch (error) {
+      console.error("Error formatting date and time:", error);
+      return "";
+    }
   }
 }

@@ -49,10 +49,14 @@ app.config.errorHandler = (err, vm, info) => {
   console.error("Vue error:", err);
   console.error("Component:", vm);
   console.error("Info:", info);
-  // Optionally show a toast
-  app.config.globalProperties.$toast.error(
-    "An unexpected error occurred. Please try again."
-  );
+
+  const message =
+    typeof err === "string"
+      ? err
+      : err?.message ||
+        "An unexpected error occurred. Please check your input and try again.";
+
+  app.config.globalProperties.$toast?.error(message);
 };
 
 app.use(createPinia());
