@@ -102,12 +102,20 @@ const downloadReport = async () => {
     toast.info("No results to download.");
     return;
   }
+
   loading.value = true;
   try {
     const response = await axiosClient.get(`/api/v1/events/${eventId}/report`, {
       responseType: "blob",
     });
-    const url = window.URL.createObjectURL(new Blob([response.data]));
+
+    // Check if it's already a Blob or wrap it
+    const blob =
+      response instanceof Blob
+        ? response
+        : new Blob([response], { type: "application/pdf" });
+
+    const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
     link.setAttribute("download", `event_${eventId}_report.pdf`);
@@ -115,8 +123,10 @@ const downloadReport = async () => {
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
+
     toast.success("Report downloaded successfully!");
   } catch (error) {
+    console.error("Download error:", error);
     toast.error(error.response?.data?.message || "Failed to download report.");
   } finally {
     loading.value = false;
@@ -131,10 +141,15 @@ const previewReport = async () => {
   loading.value = true;
   try {
     const response = await axiosClient.get(
-      `/api/v1/events/${eventId}/results/preview`, // ← this is correct
+      `/api/v1/events/${eventId}/results/preview?event_id=${eventId}`,
       { responseType: "blob" }
     );
-    const blob = new Blob([response.data], { type: "application/pdf" });
+
+    const blob =
+      response instanceof Blob
+        ? response
+        : new Blob([response], { type: "application/pdf" });
+
     previewUrl.value = window.URL.createObjectURL(blob);
     showPreview.value = true;
   } catch (error) {

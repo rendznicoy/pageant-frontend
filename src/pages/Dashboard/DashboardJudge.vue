@@ -25,6 +25,7 @@ export default {
       pusher: null,
       showConfirmModal: false,
       pollingInterval: null,
+      dataLoaded: false,
     };
   },
   setup() {
@@ -74,62 +75,117 @@ export default {
         cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER,
       });
     },
+    getCandidatePhotoUrl(path) {
+      if (!path) return null;
+
+      const base = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+      return `${base}${path}`;
+    },
     async fetchCurrentSession() {
       const token = localStorage.getItem("token");
       if (!token) {
+        this.dataLoaded = true;
         this.toast.error("No authentication token found. Please log in again.");
         this.router.push("/login/admin");
         return;
       }
+
       try {
         const response = await axiosClient.get("/api/v1/judge/current-session");
-        console.log("Fetched session:", response.data);
-        if (response.status === 200) {
-          this.judge_id = response.data.judge.judge_id;
-          this.judge_name = response.data.judge_name;
-          this.event = response.data.event;
-          this.current_category = response.data.current_category;
-          const newCandidateId =
-            response.data.next_candidate?.candidate_id || null;
-          if (newCandidateId !== this.currentCandidateId) {
-            this.currentCandidateId = newCandidateId;
-            this.hasConfirmedScore = false;
-            this.score = null;
-            this.comments = "";
-            this.temporaryScore = null;
-          }
-          this.next_candidate = response.data.next_candidate;
-          this.criteria = response.data.criteria;
-          this.isWaitingForNextCandidate =
-            this.current_category && !this.next_candidate;
-          // Handle score_status
-          if (response.data.score_status === "confirmed") {
+        console.log("Fetched session:", response);
+
+        // Store previous candidate ID for comparison
+        const previousCandidateId = this.currentCandidateId;
+        const newCandidateId = response.next_candidate?.candidate_id || null;
+        const isNewCandidate = newCandidateId !== previousCandidateId;
+
+        console.log("Previous candidate:", previousCandidateId);
+        console.log("New candidate:", newCandidateId);
+        console.log("Is new candidate?", isNewCandidate);
+
+        // Update basic session data
+        this.judge_id = response.judge.judge_id;
+        this.judge_name = response.judge_name;
+        this.event = response.event;
+        this.current_category = response.current_category;
+        this.next_candidate = response.next_candidate;
+        this.criteria = response.criteria;
+        this.currentCandidateId = newCandidateId;
+
+        // Handle candidate change - reset form completely for new candidates
+        if (isNewCandidate && newCandidateId !== null) {
+          console.log("→ NEW candidate detected, resetting form");
+          this.score = null;
+          this.comments = "";
+          this.temporaryScore = null;
+          this.hasConfirmedScore = false;
+          this.isWaitingForNextCandidate = false;
+        }
+
+        // Handle score status based on API response
+        if (newCandidateId && this.current_category) {
+          if (response.score_status === "confirmed") {
+            console.log("Score already confirmed for this candidate");
             this.hasConfirmedScore = true;
             this.isWaitingForNextCandidate = true;
-          } else if (response.data.score_status === "temporary") {
-            this.temporaryScore = {
-              score:
-                response.data.score_status === "temporary"
-                  ? response.data.score
-                  : null,
-              comments: response.data.comments || null,
-            };
-          } else {
+            this.temporaryScore = null;
+          } else if (response.score_status === "temporary") {
+            console.log("Temporary score exists, restoring state");
             this.hasConfirmedScore = false;
+            this.isWaitingForNextCandidate = false;
+
+            // Only restore temporary score if it's not a new candidate
+            if (!isNewCandidate) {
+              this.temporaryScore = {
+                score: response.score,
+                comments: response.comments || null,
+              };
+
+              // Restore form inputs if they don't match
+              if (
+                this.score !== response.score ||
+                this.comments !== (response.comments || "")
+              ) {
+                this.score = response.score;
+                this.comments = response.comments || "";
+              }
+            }
+          } else {
+            // No score exists - fresh state
+            console.log("No score exists, fresh state");
+            this.hasConfirmedScore = false;
+            this.isWaitingForNextCandidate = false;
             this.temporaryScore = null;
           }
-          if (this.event && this.event.status === "completed") {
-            this.toast.info(
-              "The event has been finalized. Thank you for your participation."
-            );
-            if (this.channel && this.event) {
-              this.pusher.unsubscribe(`event.${this.event.event_id}`);
-            }
-            this.router.push("/judge/thank-you");
-          } else if (this.event && !this.channel) {
-            this.subscribeToPusher();
-          }
+        } else {
+          // No candidate or category - waiting state
+          this.isWaitingForNextCandidate =
+            this.current_category && !this.next_candidate;
+          this.hasConfirmedScore = false;
+          this.temporaryScore = null;
         }
+
+        console.log("Final state:", {
+          currentCandidateId: this.currentCandidateId,
+          hasConfirmedScore: this.hasConfirmedScore,
+          isWaitingForNextCandidate: this.isWaitingForNextCandidate,
+          scoreStatus: response.score_status,
+          temporaryScore: this.temporaryScore,
+        });
+
+        // Handle event completion
+        if (this.event?.status === "completed") {
+          this.toast.info(
+            "The event has been finalized. Thank you for your participation."
+          );
+          if (this.channel)
+            this.pusher.unsubscribe(`event.${this.event.event_id}`);
+          this.router.push("/judge/thank-you");
+        } else if (this.event && !this.channel) {
+          this.subscribeToPusher();
+        }
+
+        this.dataLoaded = true;
       } catch (error) {
         console.error("Error fetching current session:", error);
         this.toast.error(
@@ -186,16 +242,21 @@ export default {
       });
       this.channel.bind("App\\Events\\CandidateSet", (data) => {
         console.log("CandidateSet event received", data);
+
         if (data.category_id === this.current_category?.category_id) {
+          console.log("CandidateSet: Matching category, fetching new session");
+
+          // Force refresh the session to get the new candidate
           this.fetchCurrentSession();
-          this.temporaryScore = null;
-          this.score = null;
-          this.comments = "";
-          this.isWaitingForNextCandidate = false;
-          this.hasConfirmedScore = false;
           this.toast.info("New candidate assigned");
+        } else {
+          console.log("CandidateSet: Different category, ignoring", {
+            received_category: data.category_id,
+            current_category: this.current_category?.category_id,
+          });
         }
       });
+
       this.channel.bind("App\\Events\\EventFinalized", (data) => {
         console.log("EventFinalized event received", data);
         if (data.event_id === this.event.event_id) {
@@ -209,10 +270,15 @@ export default {
     },
     startPolling() {
       this.pollingInterval = setInterval(() => {
-        if (this.event && !this.hasConfirmedScore) {
+        // Poll more frequently when waiting for next candidate or when score not confirmed
+        if (
+          this.event &&
+          (!this.hasConfirmedScore || this.isWaitingForNextCandidate)
+        ) {
+          console.log("Polling: Fetching session update");
           this.fetchCurrentSession();
         }
-      }, 10000);
+      }, 5000); // Reduced to 5 seconds for better responsiveness
     },
     validateScore() {
       if (this.score == null) {
@@ -306,7 +372,7 @@ export default {
           "/api/v1/judge/submit-score",
           payload
         );
-        this.temporaryScore = response.data.score;
+        this.temporaryScore = response.score;
         this.toast.success("Score submitted, please confirm");
       } catch (error) {
         console.error("Submission error:", {
@@ -381,7 +447,7 @@ export default {
 
     <!-- Main Content -->
     <div class="container mx-auto px-6 py-8">
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Event Information Card -->
         <div
           class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
@@ -454,34 +520,6 @@ export default {
             </div>
           </div>
         </div>
-
-        <!-- Scoring Criteria Card -->
-        <div
-          class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
-        >
-          <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
-            Scoring Criteria
-          </h2>
-          <div class="space-y-2">
-            <p class="text-gray-700">
-              <strong>Instructions:</strong> Rate each candidate on a scale of 0
-              to 100.
-            </p>
-            <ul class="list-disc pl-5 text-gray-700">
-              <li
-                v-for="(criterion, index) in criteria"
-                :key="index"
-                class="mb-1"
-              >
-                {{ criterion.name }}: {{ criterion.description }}
-              </li>
-              <li v-if="!criteria || criteria.length === 0">
-                General impression, artistic performance, and overall
-                presentation.
-              </li>
-            </ul>
-          </div>
-        </div>
       </div>
 
       <!-- Current Candidate Section -->
@@ -493,14 +531,14 @@ export default {
         </h2>
 
         <!-- Loading State -->
-        <div v-if="!event" class="flex items-center justify-center h-32">
+        <div v-if="!dataLoaded" class="flex items-center justify-center h-32">
           <div class="animate-pulse text-gray-400">
-            Loading event information...
+            Loading session details...
           </div>
         </div>
 
         <!-- Event Completed -->
-        <div v-else-if="event.status === 'completed'" class="text-center py-8">
+        <div v-else-if="event?.status === 'completed'" class="text-center py-8">
           <div class="text-3xl text-green-600 mb-4">
             <i class="fas fa-check-circle"></i>
           </div>
@@ -509,7 +547,7 @@ export default {
         </div>
 
         <!-- Event Not Active -->
-        <div v-else-if="event.status !== 'active'" class="text-center py-8">
+        <div v-else-if="event?.status !== 'active'" class="text-center py-8">
           <div class="text-3xl text-yellow-600 mb-4">
             <i class="fas fa-exclamation-triangle"></i>
           </div>
@@ -517,7 +555,7 @@ export default {
           <p class="text-gray-600">Please check back later.</p>
         </div>
 
-        <!-- No Category or Candidate -->
+        <!-- No Assigned Category or Candidate -->
         <div
           v-else-if="!current_category || !next_candidate"
           class="text-center py-8"
@@ -525,14 +563,12 @@ export default {
           <div class="text-3xl text-blue-600 mb-4">
             <i class="fas fa-hourglass-half"></i>
           </div>
-          <p
-            v-if="current_category && !next_candidate"
-            class="text-lg text-gray-700"
-          >
-            Dear Judge, all candidates in this category have been scored.
-          </p>
-          <p v-else class="text-lg text-gray-700">
-            No active category or candidate for scoring.
+          <p class="text-lg text-gray-700">
+            {{
+              current_category && !next_candidate
+                ? "All candidates in this category have been scored."
+                : "No active category or candidate assigned for scoring."
+            }}
           </p>
           <p class="text-gray-600">Please await further instructions.</p>
         </div>
@@ -558,7 +594,7 @@ export default {
           </p>
         </div>
 
-        <!-- Active Candidate for Scoring -->
+        <!-- Active Candidate Display -->
         <div v-else class="transition-opacity duration-500 ease-in-out">
           <div class="flex flex-col md:flex-row items-start">
             <!-- Candidate Info -->
@@ -577,7 +613,8 @@ export default {
               <div class="relative">
                 <img
                   v-if="next_candidate.photo"
-                  :src="next_candidate.photo"
+                  :src="getCandidatePhotoUrl(next_candidate.photo)"
+                  @error="event.target.src = '/default-avatar.png'"
                   alt="Candidate Photo"
                   class="w-48 h-48 object-cover rounded-lg shadow-md transition-transform duration-300 hover:scale-105"
                 />

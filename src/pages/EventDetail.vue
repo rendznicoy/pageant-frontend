@@ -24,6 +24,7 @@ import ResultsTab from "@/components/dashboard/ResultsTab.vue";
 import ScoresTab from "@/components/dashboard/ScoresTab.vue";
 import StageManagementTab from "@/components/dashboard/StageManagementTab.vue";
 import ChangeDivisionModal from "@/components/ui/ChangeDivisionModal.vue";
+import StatisticiansPanel from "@/components/dashboard/StatisticiansPanel.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -462,7 +463,11 @@ watch(activeTab, (newTab) => {
             </div>
             <div class="p-6">
               <div v-if="activeTab === 'overview'" class="space-y-6">
-                <EventDescription :description="event.description" />
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <EventDescription :description="event.description" />
+                  <StatisticiansPanel :statisticians="event.statisticians" />
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <EventStats
                     :candidates-count="event.candidates_count"

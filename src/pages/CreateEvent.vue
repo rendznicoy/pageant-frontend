@@ -4,21 +4,28 @@ import { useRouter } from "vue-router";
 import { useEventStore } from "@/stores/event";
 import { useUserStore } from "@/stores/user";
 import { useToast } from "vue-toastification";
+import FlatPickr from "vue-flatpickr-component";
+import "flatpickr/dist/flatpickr.css";
 import axiosClient from "@/axios";
 import Navbar from "@/components/layout/Navbar.vue";
 import Sidebar from "@/components/layout/Sidebar.vue";
 import Breadcrumbs from "@/components/layout/Breadcrumbs.vue";
+import Multiselect from "vue-multiselect";
+import "vue-multiselect/dist/vue-multiselect.min.css";
+import DateUtils from "@/utils/DateUtils";
 
 const toast = useToast();
 const router = useRouter();
 const eventStore = useEventStore();
 const userStore = useUserStore();
+const manualStatisticianInput = ref("");
+const manualStatisticians = ref([]);
 
 const userId = computed(() => userStore.user?.user_id);
 
 const eventData = ref({
   event_name: "",
-  venue: "", // ✅ replaced event_code
+  venue: "",
   start_date: "",
   end_date: "",
   status: "inactive",
@@ -41,6 +48,29 @@ const errors = ref({});
 const serverError = ref("");
 const isSubmitting = ref(false);
 
+const selectedStatisticians = ref([]);
+const allEligibleUsers = ref([]);
+
+const fetchAdmins = async () => {
+  try {
+    const res = await axiosClient.get("/api/v1/users?roles=admin,tabulator");
+    console.log("Raw response from /users:", res);
+    allEligibleUsers.value = res.data || [];
+  } catch {
+    toast.error("Failed to load statisticians");
+  }
+};
+
+onMounted(async () => {
+  await fetchAdmins();
+  if (!userStore.user) {
+    await userStore.fetchUser();
+    if (userStore.user?.user_id) {
+      eventData.value.created_by = userStore.user.user_id;
+    }
+  }
+});
+
 const handleImageUpload = (e) => {
   const file = e.target.files[0];
   if (file) {
@@ -53,21 +83,6 @@ const clearPhoto = () => {
   eventData.value.cover_photo = null;
   previewImage.value = null;
 };
-
-onMounted(async () => {
-  try {
-    if (!userStore.user) {
-      await userStore.fetchUser();
-      if (userStore.user?.user_id) {
-        eventData.value.created_by = userStore.user.user_id;
-      }
-    }
-  } catch (error) {
-    serverError.value = "Unable to fetch user data. Redirecting to login...";
-    toast.error(serverError.value, { timeout: 5000 });
-    setTimeout(() => router.push("/login"), 2000);
-  }
-});
 
 const createEvent = async () => {
   if (isSubmitting.value) return;
@@ -87,28 +102,39 @@ const createEvent = async () => {
     formData.append("venue", eventData.value.venue);
     formData.append(
       "start_date",
-      new Date(eventData.value.start_date)
-        .toISOString()
-        .slice(0, 19)
-        .replace("T", " ")
+      DateUtils.formatForApi(eventData.value.start_date)
     );
     formData.append(
       "end_date",
-      new Date(eventData.value.end_date)
-        .toISOString()
-        .slice(0, 19)
-        .replace("T", " ")
+      DateUtils.formatForApi(eventData.value.end_date)
     );
     formData.append("status", eventData.value.status);
     formData.append("division", eventData.value.division || "standard");
     formData.append("description", eventData.value.description || "");
     formData.append("created_by", eventData.value.created_by);
+    formData.append(
+      "statisticians",
+      JSON.stringify([
+        ...selectedStatisticians.value.map((user) => ({
+          id: user.user_id,
+          name: `${user.first_name} ${user.last_name}`,
+        })),
+        ...manualStatisticians.value.map((name) => ({
+          id: null,
+          name,
+        })),
+      ])
+    );
 
     if (eventData.value.cover_photo) {
       formData.append("cover_photo", eventData.value.cover_photo);
     }
 
-    const response = await axiosClient.post("/api/v1/events/create", formData, {
+    for (let pair of formData.entries()) {
+      console.log(`${pair[0]}:`, pair[1]);
+    }
+
+    await axiosClient.post("/api/v1/events/create", formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
 
@@ -121,6 +147,9 @@ const createEvent = async () => {
     isSubmitting.value = false;
   }
 };
+
+const formatDateTime = (date) =>
+  new Date(date).toISOString().slice(0, 19).replace("T", " ");
 
 const validateEventData = () => {
   let isValid = true;
@@ -184,14 +213,39 @@ const handleCreateError = (error) => {
   if (error.response?.status === 422) {
     errors.value = error.response.data.errors || {};
     serverError.value = "Validation failed. Please check the form.";
-    toast.error(serverError.value, { timeout: 5000 });
+    toast.error(serverError.value);
   } else if (error.response?.status === 401) {
     serverError.value = "You are not authorized to create events.";
-    toast.error(serverError.value, { timeout: 5000 });
+    toast.error(serverError.value);
     setTimeout(() => router.push("/login/admin"), 2000);
   } else {
     serverError.value = "Failed to create event.";
-    toast.error(serverError.value, { timeout: 5000 });
+    toast.error(serverError.value);
+  }
+};
+
+const flatPickrConfig = {
+  enableTime: true,
+  dateFormat: "Y-m-d H:i",
+  time_24hr: false,
+  minuteIncrement: 5,
+  altInput: true,
+  altFormat: "F j, Y h:i K",
+  static: true,
+  position: "auto",
+  disableMobile: true,
+};
+
+const endDateConfig = computed(() => ({
+  ...flatPickrConfig,
+  minDate: eventData.value.start_date || new Date(),
+}));
+
+const addManualStatistician = () => {
+  const name = manualStatisticianInput.value.trim();
+  if (name && !manualStatisticians.value.includes(name)) {
+    manualStatisticians.value.push(name);
+    manualStatisticianInput.value = "";
   }
 };
 </script>
@@ -221,9 +275,8 @@ const handleCreateError = (error) => {
           <label
             for="event_name"
             class="block text-sm font-medium text-gray-700"
+            >Event Name (max 50 characters)</label
           >
-            Event Name (max 50 characters)
-          </label>
           <input
             id="event_name"
             v-model="eventData.event_name"
@@ -236,10 +289,11 @@ const handleCreateError = (error) => {
             {{ errors.event_name[0] }}
           </p>
         </div>
+
         <div>
-          <label for="venue" class="block text-sm font-medium text-gray-700">
-            Venue
-          </label>
+          <label for="venue" class="block text-sm font-medium text-gray-700"
+            >Venue</label
+          >
           <input
             id="venue"
             v-model="eventData.venue"
@@ -251,15 +305,16 @@ const handleCreateError = (error) => {
             {{ errors.venue[0] }}
           </p>
         </div>
+
         <div>
           <label
             for="start_date"
             class="block text-sm font-medium text-gray-700"
+            >Start Date & Time</label
           >
-            Start Date & Time
-          </label>
           <FlatPickr
             v-model="eventData.start_date"
+            :config="flatPickrConfig"
             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
             required
           />
@@ -267,12 +322,14 @@ const handleCreateError = (error) => {
             {{ errors.start_date[0] }}
           </p>
         </div>
+
         <div>
-          <label for="end_date" class="block text-sm font-medium text-gray-700">
-            End Date & Time
-          </label>
+          <label for="end_date" class="block text-sm font-medium text-gray-700"
+            >End Date & Time</label
+          >
           <FlatPickr
             v-model="eventData.end_date"
+            :config="endDateConfig"
             class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
             required
           />
@@ -280,13 +337,13 @@ const handleCreateError = (error) => {
             {{ errors.end_date[0] }}
           </p>
         </div>
+
         <div>
           <label
             for="description"
             class="block text-sm font-medium text-gray-700"
+            >Event Description (optional)</label
           >
-            Event Description (optional)
-          </label>
           <textarea
             id="description"
             v-model="eventData.description"
@@ -297,10 +354,11 @@ const handleCreateError = (error) => {
             {{ errors.description[0] }}
           </p>
         </div>
+
         <div>
-          <label for="status" class="block text-sm font-medium text-gray-700">
-            Status
-          </label>
+          <label for="status" class="block text-sm font-medium text-gray-700"
+            >Status</label
+          >
           <select
             id="status"
             v-model="eventData.status"
@@ -314,6 +372,7 @@ const handleCreateError = (error) => {
             {{ errors.status[0] }}
           </p>
         </div>
+
         <div>
           <label class="block text-sm font-medium text-gray-700"
             >Division</label
@@ -328,10 +387,97 @@ const handleCreateError = (error) => {
             <option value="female-only">Female-only</option>
           </select>
         </div>
+
         <div>
-          <label class="block text-sm font-medium text-gray-700">
-            Event Cover Photo (optional, max 5MB)
-          </label>
+          <label class="block text-sm font-medium text-gray-700"
+            >Statisticians</label
+          >
+          <Multiselect
+            v-model="selectedStatisticians"
+            :options="allEligibleUsers"
+            :multiple="true"
+            :track-by="'user_id'"
+            :label="'email'"
+            placeholder="Select statisticians"
+            class="mt-1"
+          >
+            <template #tag="{ option, remove }">
+              <span
+                class="inline-flex items-center rounded-full bg-gray-200 px-2 py-1 text-sm text-gray-700 mr-1 mb-1"
+              >
+                <img
+                  :src="option.profile_photo"
+                  class="w-5 h-5 rounded-full mr-1"
+                  alt="avatar"
+                />
+                {{ option.email }}
+                <button
+                  type="button"
+                  class="ml-1 text-gray-500 hover:text-red-500"
+                  @click.stop="remove(option)"
+                >
+                  &times;
+                </button>
+              </span>
+            </template>
+
+            <template #option="{ option }">
+              <div class="flex items-center gap-2">
+                <img
+                  :src="option.profile_photo"
+                  class="w-6 h-6 rounded-full"
+                  alt="avatar"
+                />
+                <span class="text-sm">{{ option.email }}</span>
+              </div>
+            </template>
+          </Multiselect>
+          <div class="mt-4">
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Manually Add Statistician (For non-registered users)
+            </label>
+            <div class="flex gap-2">
+              <input
+                v-model="manualStatisticianInput"
+                type="text"
+                placeholder="Full Name"
+                class="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500"
+              />
+              <button
+                type="button"
+                @click="addManualStatistician"
+                class="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+              >
+                Add
+              </button>
+            </div>
+
+            <div
+              v-if="manualStatisticians.length"
+              class="mt-2 flex flex-wrap gap-2"
+            >
+              <span
+                v-for="(name, index) in manualStatisticians"
+                :key="index"
+                class="inline-flex items-center bg-gray-200 px-3 py-1 rounded-full text-sm text-gray-700"
+              >
+                {{ name }}
+                <button
+                  @click="manualStatisticians.splice(index, 1)"
+                  class="ml-2 text-gray-500 hover:text-red-600"
+                  title="Remove"
+                >
+                  &times;
+                </button>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-gray-700"
+            >Event Cover Photo (optional, max 5MB)</label
+          >
           <input
             type="file"
             @change="handleImageUpload"
@@ -354,6 +500,7 @@ const handleCreateError = (error) => {
             </button>
           </div>
         </div>
+
         <div>
           <button
             type="submit"

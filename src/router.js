@@ -162,7 +162,13 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to, from, next) => {
+  const isJudgeSession = localStorage.getItem("judgeSession") === "true";
+
   if (to.meta.requiresAuth) {
+    if (isJudgeSession && to.meta.role === "judge") {
+      return next(); // skip fetchUser for judge session
+    }
+
     try {
       await axiosClient.get("/api/v1/user");
       next();

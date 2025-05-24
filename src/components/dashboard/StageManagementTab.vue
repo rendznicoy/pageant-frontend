@@ -1,10 +1,23 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import {
+  ref,
+  onMounted,
+  onUnmounted,
+  computed,
+  watch,
+  watchEffect,
+  nextTick,
+} from "vue";
 import { useToast } from "vue-toastification";
 import { debounce } from "lodash";
 import axiosClient from "@/axios";
 import Pusher from "pusher-js";
 import { useRouter } from "vue-router";
+
+const selectStage = (stage) => {
+  selectedStage.value = stage;
+  showTopCandidatesModal.value = true;
+};
 
 const props = defineProps({
   eventId: {
@@ -28,15 +41,18 @@ const showConfirmSelectModal = ref(false);
 const showConfirmResetModal = ref(false);
 const pendingScoresMap = ref({});
 const hasSelectedTopCandidates = ref({});
+
 let pusher = null;
 let channel = null;
 
-// Determine the last stage
-const lastStage = computed(() => {
-  if (!stages.value.length) return null;
-  // Sort by id and take the last one
-  return stages.value.sort((a, b) => a.id - b.id)[stages.value.length - 1];
-});
+const hasPending = (categoryId) => {
+  const key = String(categoryId);
+  const value = pendingScoresMap.value[key];
+  if (value === undefined) {
+    console.warn(`pendingScoresMap missing key: ${key}`);
+  }
+  return Boolean(value);
+};
 
 const fetchStages = async () => {
   if (!props.eventId || isNaN(props.eventId)) {
@@ -45,15 +61,49 @@ const fetchStages = async () => {
     loading.value = false;
     return;
   }
+
   loading.value = true;
   try {
     console.log("Fetching stages for eventId:", props.eventId);
+
+    // Fetch stages
     const stagesResponse = await axiosClient.get(
       `/api/v1/events/${props.eventId}/stages`
     );
-    stages.value = stagesResponse.data || [];
+    stages.value = stagesResponse.data.map((stage) => ({
+      ...stage,
+      id: stage.stage_id,
+      categories: (stage.categories ?? []).map((cat) => ({
+        ...cat,
+        id: cat.category_id,
+      })),
+    }));
 
-    // Initialize hasSelectedTopCandidates based on top_candidates_count
+    // Fetch pending scores
+    const pendingScoresResponse = await axiosClient.get(
+      `/api/v1/events/${props.eventId}/categories/pending-scores`
+    );
+    const rawMap = pendingScoresResponse?.pending_scores ?? {};
+    pendingScoresMap.value = {};
+
+    // Initialize pendingScoresMap with real values
+    for (const stage of stages.value) {
+      for (const cat of stage.categories) {
+        const key = String(cat.id);
+        pendingScoresMap.value[key] = Boolean(rawMap[key] ?? false);
+      }
+    }
+
+    // Set category flags
+    for (const stage of stages.value) {
+      for (const category of stage.categories) {
+        const hasPending = pendingScoresMap.value[String(category.id)];
+        category.has_pending_scores = hasPending;
+        category.cannot_switch = hasPending;
+      }
+    }
+
+    // Initialize hasSelectedTopCandidates
     stages.value.forEach((stage) => {
       hasSelectedTopCandidates.value[stage.id] = !!stage.top_candidates_count;
       console.log(
@@ -62,93 +112,110 @@ const fetchStages = async () => {
       );
     });
 
-    const pendingScoresResponse = await axiosClient.get(
-      `/api/v1/events/${props.eventId}/categories/pending-scores`
-    );
-    pendingScoresMap.value = pendingScoresResponse.data.pending_scores || {};
-    console.log("Pending scores:", pendingScoresMap.value);
-
-    for (const stage of stages.value) {
-      for (const category of stage.categories) {
-        category.has_pending_scores =
-          pendingScoresMap.value[category.id] || false;
-        console.log(
-          `Category ${category.id} has_pending_scores:`,
-          category.has_pending_scores
-        );
-      }
-    }
-
+    // Set initial current candidate
     const activeCategories = stages.value
-      .flatMap((stage) => stage.categories)
+      .flatMap((stage) => stage.categories ?? [])
       .filter((cat) => cat.status === "active");
+
     if (
       activeCategories.length > 0 &&
       activeCategories[0].current_candidate_id
     ) {
       currentCandidateId.value = activeCategories[0].current_candidate_id;
     }
+
+    console.log(
+      "→ Set pendingScoresMap during fetchStages:",
+      pendingScoresMap.value
+    );
     console.log("Stages fetched:", stages.value);
   } catch (error) {
-    console.error("Error fetching stages:", error);
-    toast.error(error.response?.data?.message || "Failed to load stages.");
+    handleError(error, "Failed to load stages.");
   } finally {
     loading.value = false;
   }
 };
 
-const activeCandidates = computed(() => {
-  return candidates.value.filter((candidate) => candidate.is_active === true);
-});
+const activeCandidates = ref([]);
 
 const fetchCandidates = async () => {
   try {
     const response = await axiosClient.get(
       `/api/v1/events/${props.eventId}/candidates`
     );
-    console.log("Full candidates response:", response.data);
-    candidates.value = response.data.data || [];
-    console.log(
-      "Candidates fetched:",
-      candidates.value.map((c) => ({
-        id: c.candidate_id,
-        name: `${c.first_name} ${c.last_name}`,
-        is_active: c.is_active,
-      }))
-    );
-    if (!candidates.value.length) {
-      toast.warning("No active candidates found for this event.");
-    }
+
+    const raw = Array.isArray(response.data)
+      ? response.data
+      : response.data.data || [];
+
+    candidates.value = raw.map((c) => ({
+      ...c,
+      is_active: c.is_active == 1,
+    }));
+
+    activeCandidates.value = candidates.value.filter((c) => c.is_active);
+
+    // Debugging info
+    console.log("CANDIDATES:", candidates.value);
+    console.log("ACTIVE CANDIDATES:", activeCandidates.value);
   } catch (error) {
-    console.error("Error fetching candidates:", error);
-    toast.error("Failed to fetch candidates.");
+    handleError(error, "Failed to fetch candidates");
   }
 };
 
 const fetchPartialResults = async (stageId) => {
+  loading.value = true;
   try {
-    console.log("Fetching partial results for:", {
-      eventId: props.eventId,
-      stageId,
-    });
+    console.log("→ Calling partial-results for stage", stageId);
+
+    // 1. Call the endpoint
     const response = await axiosClient.get(
       `/api/v1/events/${props.eventId}/stages/${stageId}/partial-results`
     );
-    partialResults.value = response.data.candidates || [];
-    console.log("Partial results fetched:", partialResults.value);
+
+    // 2. Inspect what you actually got back
+    console.log("← Raw response object:", response);
+
+    // 3. Figure out where `candidates` lives
+    const payload =
+      response && typeof response === "object"
+        ? // if there's a .candidates on the root, use it, otherwise look under .data
+          "candidates" in response
+          ? response
+          : response.data || {}
+        : {};
+
+    // 4. Pull out the array (or fall back to empty)
+    const rawCandidates = Array.isArray(payload.candidates)
+      ? payload.candidates
+      : [];
+
+    // 5. Normalize and set your ref
+    partialResults.value = rawCandidates.map((c) => ({
+      ...c,
+      sex:
+        c.sex?.toLowerCase() === "m"
+          ? "male"
+          : c.sex?.toLowerCase() === "f"
+          ? "female"
+          : c.sex,
+    }));
+
+    console.log("⤷ Parsed partialResults:", partialResults.value);
+
+    // 6. Notify if *really* empty
     if (!partialResults.value.length) {
       console.warn("No partial results returned for stage:", stageId);
       toast.info("No confirmed scores available for this stage yet.");
     }
+
+    // 7. Force a re-render
+    await nextTick();
   } catch (error) {
-    console.error("Error fetching partial results:", {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status,
-    });
-    toast.error(
-      error.response?.data?.message || "Failed to load partial results."
-    );
+    handleError(error, "Failed to load partial results");
+    partialResults.value = [];
+  } finally {
+    loading.value = false;
   }
 };
 
@@ -166,11 +233,14 @@ const startStage = async (stageId) => {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/stages/${stageId}/start`
     );
-    toast.success(response.data.message || "Stage started successfully!");
+
+    const msg = response?.data?.message || "Stage started.";
+    toast.success(msg);
+
     await fetchStages();
     await fetchPartialResults(stageId);
   } catch (error) {
-    toast.error(error.response?.data?.message || "Failed to start stage.");
+    handleError(error, "Failed to start stage");
   } finally {
     loading.value = false;
   }
@@ -182,11 +252,14 @@ const resetStage = async (stageId) => {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/stages/${stageId}/reset`
     );
-    toast.success(response.data.message || "Stage reset successfully!");
+
+    const msg = response?.data?.message || "Stage reset successfully!";
+    toast.success(msg);
+
     await fetchStages();
     partialResults.value = [];
   } catch (error) {
-    toast.error(error.response?.data?.message || "Failed to reset stage.");
+    handleError(error, "Failed to reset stage");
   } finally {
     loading.value = false;
   }
@@ -202,7 +275,7 @@ const finalizeStage = async (stageId) => {
     await fetchStages();
     await fetchPartialResults(stageId);
   } catch (error) {
-    toast.error(error.response?.data?.message || "Failed to finalize stage.");
+    handleError(error, "Failed to finalize stage");
   } finally {
     loading.value = false;
   }
@@ -214,11 +287,12 @@ const startCategory = async (categoryId) => {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${categoryId}/start`
     );
-    toast.success(response.data.message || "Category started successfully!");
+
+    const msg = response?.data?.message || "Category started successfully!";
+    toast.success(msg);
     await fetchStages();
   } catch (error) {
-    console.error("Start Category error:", error.response?.data);
-    toast.error(error.response?.data?.message || "Failed to start category.");
+    handleError(error, "Failed to start category");
   } finally {
     loading.value = false;
   }
@@ -230,45 +304,73 @@ const resetCategory = async (categoryId) => {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${categoryId}/reset`
     );
-    toast.success(response.data.message || "Category reset successfully!");
+
+    const msg = response?.data?.message || "Category reset successfully!";
+    toast.success(msg);
     await fetchStages();
   } catch (error) {
-    console.error("Reset Category error:", error.response?.data);
-    toast.error(error.response?.data?.message || "Failed to reset category.");
+    handleError(error, "Failed to reset category");
   } finally {
     loading.value = false;
   }
 };
 
 const setCandidate = debounce(async (categoryId, candidateId) => {
+  const category = stages.value
+    .flatMap((stage) => stage.categories)
+    .find((c) => c.id === categoryId);
+
+  if (!category) {
+    toast.error("Category not found.");
+    return;
+  }
+
+  const previousCandidateId = category.current_candidate_id;
+
+  // Check if dropdown should be disabled
+  if (isCandidateDropdownDisabled(category)) {
+    toast.warning(
+      "Cannot change candidate while scoring is in progress or candidate is already set."
+    );
+    category.current_candidate_id = previousCandidateId;
+    return;
+  }
+
   if (!candidateId) {
     toast.error("Please select a valid candidate.");
     return;
   }
+
   loading.value = true;
+
   try {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${categoryId}/set-candidate`,
       { candidate_id: candidateId }
     );
-    toast.success(response.data.message || "Candidate set successfully!");
+
+    toast.success(response?.data?.message || "Candidate set successfully!");
     currentCandidateId.value = candidateId;
-    await fetchStages();
+
+    await fetchStages(); // Only refresh if success
   } catch (error) {
-    console.error("Set candidate error:", error.response?.data);
-    toast.error(error.response?.data?.message || "Failed to set candidate.");
-    if (error.response?.status === 422) {
-      const activeCategory = stages.value
-        .flatMap((stage) => stage.categories)
-        .find((cat) => cat.id === categoryId);
-      if (activeCategory && activeCategory.current_candidate_id) {
-        currentCandidateId.value = activeCategory.current_candidate_id;
-      }
-    }
+    category.current_candidate_id = previousCandidateId;
+    handleError(error, "Failed to set candidate");
   } finally {
     loading.value = false;
   }
 }, 300);
+
+const onCandidateChange = async (category, newCandidateId) => {
+  const oldValue = category.current_candidate_id;
+
+  try {
+    await setCandidate(category.id, newCandidateId);
+  } catch (error) {
+    category.current_candidate_id = oldValue; // Revert if switch fails
+    toast.error(error.message || "Failed to switch candidate");
+  }
+};
 
 const finalizeCategory = async (categoryId) => {
   loading.value = true;
@@ -284,9 +386,7 @@ const finalizeCategory = async (categoryId) => {
     );
     if (stage) await fetchPartialResults(stage.id);
   } catch (error) {
-    toast.error(
-      error.response?.data?.message || "Failed to finalize category."
-    );
+    handleError(error, "Failed to finalize category");
   } finally {
     loading.value = false;
   }
@@ -301,6 +401,38 @@ const selectTopCandidates = async () => {
 };
 
 const confirmSelectTopCandidates = async () => {
+  const males = partialResults.value.filter(
+    (c) => c.sex?.toLowerCase() === "m" || c.sex?.toLowerCase() === "M"
+  );
+  const females = partialResults.value.filter(
+    (c) => c.sex?.toLowerCase() === "f" || c.sex?.toLowerCase() === "F"
+  );
+
+  console.log(
+    "Filtered MALES:",
+    males.length,
+    males.map((c) => c.candidate?.first_name)
+  );
+  console.log(
+    "Filtered FEMALES:",
+    females.length,
+    females.map((c) => c.candidate?.first_name)
+  );
+
+  console.log(
+    "RAW partialResults response:",
+    JSON.stringify(partialResults.value, null, 2)
+  );
+
+  const requiredPerSex = topCandidatesCount.value / 2;
+
+  if (males.length < requiredPerSex || females.length < requiredPerSex) {
+    toast.error(
+      `Not enough candidates. You need at least ${requiredPerSex} males and ${requiredPerSex} females with confirmed scores.`
+    );
+    return;
+  }
+
   loading.value = true;
   try {
     await axiosClient.post(
@@ -310,15 +442,13 @@ const confirmSelectTopCandidates = async () => {
       }
     );
     toast.success("Top candidates selected successfully!");
-    hasSelectedTopCandidates.value[selectedStage.value.id] = true; // Mark stage as having selected candidates
+    hasSelectedTopCandidates.value[selectedStage.value.id] = true;
     showTopCandidatesModal.value = false;
     showConfirmSelectModal.value = false;
     await fetchCandidates();
     await fetchStages();
   } catch (error) {
-    toast.error(
-      error.response?.data?.message || "Failed to select top candidates."
-    );
+    handleError(error, "Failed to select top candidates");
   } finally {
     loading.value = false;
   }
@@ -341,15 +471,14 @@ const confirmResetTopCandidates = async () => {
     await fetchCandidates();
     await fetchStages();
   } catch (error) {
-    toast.error(
-      error.response?.data?.message || "Failed to reset top candidates."
-    );
+    handleError(error, "Failed to reset top candidates.");
   } finally {
     loading.value = false;
   }
 };
 
 const setupWebSocket = () => {
+  if (pusher && pusher.connection.state === "connected") return;
   const appKey = import.meta.env.VITE_PUSHER_APP_KEY;
   const cluster = import.meta.env.VITE_PUSHER_APP_CLUSTER;
 
@@ -366,54 +495,79 @@ const setupWebSocket = () => {
     });
 
     channel = pusher.subscribe(`event.${props.eventId}`);
-    const debouncedFetchStages = debounce(fetchStages, 1000);
+    const debouncedFetchStages = debounce(fetchStages, 10000);
+
     channel.bind("App\\Events\\StageStatusUpdated", (e) => {
-      toast.info(`Stage ${e.stage_id} status updated to ${e.status}`);
+      console.log(`Stage ${e.stage_id} status updated to ${e.status}`);
       debouncedFetchStages();
     });
-    channel.bind("App\\Events\\CategoryStatusUpdated", (e) => {
+
+    // inside setupWebSocket():
+    channel.bind("App\\Events\\CategoryStatusUpdated", async (e) => {
       toast.info(`Category ${e.category_id} status updated to ${e.status}`);
-      debouncedFetchStages();
-    });
-    channel.bind("App\\Events\\CandidateSet", async (e) => {
-      toast.info(`Candidate ${e.candidate_id} set for scoring`);
-      currentCandidateId.value = e.candidate_id;
+
+      await fetchStages();
       await refreshPendingScores();
-      debouncedFetchStages();
+
+      if (e.status === "finalized") {
+        const stage = stages.value.find((stage) =>
+          stage.categories.some((cat) => cat.id === e.category_id)
+        );
+
+        if (stage && stage.id === selectedStage.value?.id) {
+          await fetchPartialResults(stage.id);
+        }
+      }
     });
+
     channel.bind("App\\Events\\ScoreSubmitted", async (e) => {
       toast.info(`Score submitted for candidate`);
       await refreshPendingScores();
     });
     channel.bind("App\\Events\\ScoreConfirmed", async (e) => {
-      console.log("ScoreConfirmed event received:", e);
-      toast.info(`Score confirmed for candidate`);
       await refreshPendingScores();
-      if (e.all_confirmed) {
-        const stage = stages.value.find((s) =>
-          s.categories.some((c) => c.id === e.score.category_id)
-        );
-        if (stage) {
-          console.log("Fetching partial results for stage:", stage.id);
-          await fetchPartialResults(stage.id);
-          toast.info("Partial results updated");
-        } else {
-          console.warn("No stage found for category_id:", e.score.category_id);
-          toast.error(
-            "Stage not found for category. Partial results not updated."
-          );
-        }
-      } else {
-        console.log("Not all scores confirmed yet:", {
-          category_id: e.score.category_id,
-          candidate_id: e.score.candidate_id,
-        });
+
+      // only refresh the partial‐results table when this was the last judge
+      if (
+        selectedStage.value?.id === e.stage_id &&
+        !pendingScoresMap.value[String(e.category_id)]
+      ) {
+        await fetchPartialResults(e.stage_id);
       }
     });
   } catch (error) {
-    console.error("Failed to initialize Pusher:", error);
-    toast.error("Failed to connect to real-time updates.");
+    handleError(error, "Failed to connect to real-time updates");
   }
+};
+
+// Updated function to determine if candidate dropdown should be disabled
+const isCandidateDropdownDisabled = (category) => {
+  const id = String(category.id || category.category_id);
+  if (!id) return true;
+
+  const hasPendingScores = Boolean(pendingScoresMap.value[id]);
+
+  console.log(
+    `Category ${id} - Dropdown Disabled:`,
+    hasPendingScores || loading.value,
+    "PendingScoresMap:",
+    pendingScoresMap.value[id],
+    "Loading:",
+    loading.value
+  );
+
+  return hasPendingScores || loading.value;
+};
+
+const isCandidateUsedElsewhere = (candidateId, currentCategoryId) => {
+  return stages.value
+    .flatMap((stage) => stage.categories)
+    .some(
+      (cat) =>
+        cat.id !== currentCategoryId &&
+        cat.status === "active" &&
+        cat.current_candidate_id === candidateId
+    );
 };
 
 const refreshPendingScores = async () => {
@@ -421,25 +575,104 @@ const refreshPendingScores = async () => {
     const response = await axiosClient.get(
       `/api/v1/events/${props.eventId}/categories/pending-scores`
     );
-    pendingScoresMap.value = response.data.pending_scores || {};
+    const rawMap = response?.data?.pending_scores || {};
+    pendingScoresMap.value = { ...rawMap };
+
+    console.log("→ REFRESH pendingScoresMap:", pendingScoresMap.value);
+
     for (const stage of stages.value) {
       for (const category of stage.categories) {
-        category.has_pending_scores =
-          pendingScoresMap.value[category.id] || false;
+        // Ensure ID is present
+        category.id = category.id || category.category_id;
+
+        const key = String(category.id);
+        const updated = Boolean(pendingScoresMap.value[key]);
+
+        console.log(
+          `→ Category ${key}: has_pending_scores = ${updated}, from map:`,
+          pendingScoresMap.value
+        );
       }
     }
   } catch (error) {
-    console.error("Error refreshing pending scores:", error);
-    toast.error("Failed to refresh pending scores");
+    handleError(error, "Failed to refresh pending scores");
   }
 };
 
-const categoryHasPendingScores = (computed) => {
-  return pendingScoresMap.value[category.id] || false;
+const refreshPartialResults = async () => {
+  // 1) pick the stage you're showing the table for…
+  const stageToFetch =
+    selectedStage.value ||
+    stages.value.find((s) => s.status === "active") ||
+    stages.value.find((s) => s.status === "finalized");
+
+  // 2) clear out the old rows so the user sees the spinner/empty state
+  partialResults.value = [];
+
+  if (stageToFetch) {
+    await fetchPartialResults(stageToFetch.id);
+  }
 };
 
-const candidateHasScore = (categoryId, candidateId) => {
-  return false;
+const getAvailableCandidates = (categoryId) => {
+  return candidates.value.filter((candidate) => {
+    // Only show active candidates
+    if (!candidate.is_active) return false;
+
+    // Find the category to check its current state
+    const category = stages.value
+      .flatMap((stage) => stage.categories)
+      .find((c) => c.id === categoryId);
+
+    if (!category) return false;
+
+    // If this category already has this candidate set, always allow it to be selected
+    if (category.current_candidate_id === candidate.candidate_id) {
+      return true;
+    }
+
+    // Check if this candidate is currently being used in any OTHER active category
+    const isCurrentlyUsedElsewhere = stages.value
+      .flatMap((stage) => stage.categories)
+      .some(
+        (cat) =>
+          cat.id !== categoryId && // Different category
+          cat.status === "active" && // Category is active
+          cat.current_candidate_id === candidate.candidate_id // Candidate is set
+      );
+
+    // Exclude candidates currently being used in other active categories
+    return !isCurrentlyUsedElsewhere;
+  });
+};
+
+const getCandidateDisplayText = (candidate, categoryId) => {
+  const baseText = `${candidate.candidate_number} - ${candidate.first_name} ${candidate.last_name}`;
+
+  if (isCandidateUsedElsewhere(candidate.candidate_id, categoryId)) {
+    return `${baseText} (In use elsewhere)`;
+  }
+
+  return baseText;
+};
+
+const handleError = (
+  error,
+  fallbackMessage = "An unexpected error occurred"
+) => {
+  const message =
+    error?.response?.data?.message ||
+    error?.response?.data?.error ||
+    error?.message ||
+    fallbackMessage;
+
+  toast.error(message);
+
+  console.error("API Error:", {
+    message,
+    full: error,
+    response: error?.response,
+  });
 };
 
 const hasActiveCategoryInStage = (stage) => {
@@ -447,11 +680,18 @@ const hasActiveCategoryInStage = (stage) => {
 };
 
 const maleResults = computed(() =>
-  partialResults.value.filter((result) => result.sex === "male")
+  partialResults.value.filter(
+    (result) =>
+      result.sex?.toLowerCase() === "m" || result.sex?.toLowerCase() === "male"
+  )
 );
 
 const femaleResults = computed(() =>
-  partialResults.value.filter((result) => result.sex === "female")
+  partialResults.value.filter(
+    (result) =>
+      result.sex?.toLowerCase() === "f" ||
+      result.sex?.toLowerCase() === "female"
+  )
 );
 
 onMounted(async () => {
@@ -466,9 +706,28 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
-  if (pusher && channel) {
-    pusher.unsubscribe(`event.${props.eventId}`);
-    pusher.disconnect();
+  try {
+    if (pusher && pusher.connection.state === "connected") {
+      pusher.unsubscribe(`event.${props.eventId}`);
+      pusher.disconnect();
+    }
+  } catch (e) {
+    console.warn("Error during Pusher cleanup:", e.message);
+  }
+});
+
+watch(selectedStage, (newStage) => {
+  if (!newStage || !newStage.id) return;
+  partialResults.value = [];
+  fetchPartialResults(newStage.id);
+});
+
+watchEffect(async () => {
+  const activeStage = stages.value.find((s) => s.status === "active");
+  if (activeStage && selectedStage.value?.id !== activeStage.id) {
+    selectedStage.value = activeStage;
+    partialResults.value = [];
+    await fetchPartialResults(activeStage.id);
   }
 });
 </script>
@@ -526,12 +785,10 @@ onUnmounted(() => {
                 v-if="stage.status === 'finalized'"
                 @click="
                   () => {
-                    selectedStage = stage;
                     if (lastStage?.id === stage.id) {
                       viewFinalResults(stage.id);
                     } else {
-                      fetchPartialResults(stage.id);
-                      showTopCandidatesModal = true;
+                      selectStage(stage);
                     }
                   }
                 "
@@ -595,7 +852,7 @@ onUnmounted(() => {
                     Start Category
                   </button>
                   <button
-                    v-if="category.status === 'active'"
+                    v-if="['active', 'finalized'].includes(category.status)"
                     @click="resetCategory(category.id)"
                     class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
                     :disabled="loading"
@@ -610,34 +867,96 @@ onUnmounted(() => {
                   >
                     Finalize Category
                   </button>
-                  <select
-                    v-if="category.status === 'active'"
-                    v-model="category.current_candidate_id"
-                    @change="setCandidate(category.id, $event.target.value)"
-                    :disabled="
-                      category.status !== 'active' ||
-                      category.has_pending_scores
-                    "
-                  >
-                    <option value="">Select Candidate</option>
-                    <option
-                      v-for="candidate in candidates"
-                      :value="candidate.candidate_id"
-                      :key="candidate.candidate_id"
-                    >
-                      {{ candidate.candidate_number }} -
-                      {{ candidate.first_name }} {{ candidate.last_name }}
-                    </option>
-                  </select>
-                  <p
+
+                  <!-- Updated Candidate Selection Logic -->
+                  <template
                     v-if="
-                      category.status === 'active' &&
-                      category.has_pending_scores
+                      stage.status === 'active' && category.status === 'active'
                     "
-                    class="text-xs text-orange-500 mt-1"
                   >
-                    Cannot change candidate while scoring is in progress
-                  </p>
+                    <select
+                      :value="category.current_candidate_id || ''"
+                      @change="
+                        (e) => onCandidateChange(category, e.target.value)
+                      "
+                      :disabled="
+                        category && isCandidateDropdownDisabled(category)
+                      "
+                      class="border border-gray-300 rounded px-2 py-1"
+                      :class="{
+                        'bg-gray-100 cursor-not-allowed':
+                          isCandidateDropdownDisabled(category),
+                        'bg-white': !isCandidateDropdownDisabled(category),
+                      }"
+                    >
+                      <option value="">
+                        {{
+                          category.current_candidate_id
+                            ? "Change Candidate"
+                            : "Select Candidate"
+                        }}
+                      </option>
+                      <!-- Use the updated filtering method -->
+                      <option
+                        v-for="candidate in getAvailableCandidates(category.id)"
+                        :key="candidate.candidate_id"
+                        :value="candidate.candidate_id"
+                        :class="{
+                          'font-semibold':
+                            category.current_candidate_id ===
+                            candidate.candidate_id,
+                        }"
+                      >
+                        {{ candidate.candidate_number }} -
+                        {{ candidate.first_name }} {{ candidate.last_name }}
+                        <span
+                          v-if="
+                            category.current_candidate_id ===
+                            candidate.candidate_id
+                          "
+                        >
+                          (Current)</span
+                        >
+                      </option>
+                    </select>
+
+                    <!-- Enhanced Status Messages -->
+                    <div class="text-xs mt-1">
+                      <p v-if="hasPending(category.id)" class="text-red-500">
+                        Scoring in progress - dropdown disabled
+                      </p>
+                      <p
+                        v-else-if="category.current_candidate_id"
+                        class="text-green-500"
+                      >
+                        All scores confirmed - can change candidate
+                      </p>
+                      <p v-else class="text-gray-500">
+                        Ready to select candidate
+                      </p>
+                      <!-- Show count of available candidates -->
+                      <p class="text-gray-400 text-xs">
+                        {{ getAvailableCandidates(category.id).length }}
+                        candidates available
+                        <span v-if="category.current_candidate_id"
+                          >(including current)</span
+                        >
+                      </p>
+                    </div>
+                  </template>
+
+                  <!-- only show that hint if category is still pending or stage isn’t active -->
+                  <template
+                    v-else-if="
+                      stage.status !== 'active' || category.status === 'pending'
+                    "
+                  >
+                    <p class="text-xs text-gray-500 mt-1">
+                      Candidate selection available only when stage and category
+                      are active.
+                    </p>
+                  </template>
+                  <!-- if category.status==='finalized', nothing gets shown here (you’ll have your Reset button above) -->
                 </div>
               </div>
             </div>
@@ -699,9 +1018,9 @@ onUnmounted(() => {
                 {{ result.rank }}
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ result.candidate.first_name }}
-                {{ result.candidate.last_name }} (#{{
-                  result.candidate.candidate_number
+                {{ result.candidate?.first_name }}
+                {{ result.candidate?.last_name }} (#{{
+                  result.candidate?.candidate_number
                 }})
               </td>
               <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">

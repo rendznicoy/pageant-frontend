@@ -20,25 +20,26 @@ const debouncedHandleJudgeLogin = debounce(async () => {
   const pin_code = pinInputs.map((r) => r.value).join("");
   error.value = "";
   try {
-    await axiosClient.get("/api/csrf-cookie");
-    console.log("CSRF token fetched");
+    console.log("Skipping CSRF for judge login");
+    console.log(axiosClient.defaults.headers.common["Authorization"]);
 
-    const response = await axiosClient.post("/api/v1/login/judge", {
-      pin_code,
-    });
-    if (response.status === 200) {
-      const { token, user } = response.data;
-      localStorage.setItem("token", token);
-      axiosClient.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-      console.log("Stored token in localStorage:", token);
-      console.log("User data:", user);
+    const response = await axiosClient.post(
+      "/api/v1/login/judge",
+      { pin_code },
+      { withCredentials: false }
+    );
 
-      userStore.setUser(user);
+    const { token, user } = response;
+    if (!user || !token) throw new Error("Incomplete login response");
 
-      console.log("Attempting to redirect to /judge/dashboard");
-      await router.push("/judge/dashboard");
-      console.log("Redirection completed");
-    }
+    localStorage.setItem("token", token);
+    localStorage.setItem("judgeSession", "true");
+
+    axiosClient.defaults.headers.common["Authorization"] = `Bearer ${token}`;
+    userStore.setUser(user);
+
+    console.log("Redirecting to judge dashboard...");
+    await router.push("/judge/dashboard");
   } catch (err) {
     error.value =
       err.response?.data?.message || "Invalid PIN. Please try again.";

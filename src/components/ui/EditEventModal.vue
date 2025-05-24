@@ -1,9 +1,10 @@
 <script setup>
-import { ref, watch, computed } from "vue";
+import { ref, watch, computed, onMounted } from "vue";
 import { useToast } from "vue-toastification";
 import DateUtils from "@/utils/DateUtils";
 import FlatPickr from "vue-flatpickr-component";
 import "flatpickr/dist/flatpickr.css";
+import axiosClient from "@/axios";
 
 const props = defineProps({
   show: Boolean,
@@ -28,6 +29,42 @@ const selectedFile = ref(null);
 const previewUrl = ref("");
 const errors = ref({});
 
+const selectedStatisticians = ref([]);
+const allEligibleUsers = ref([]);
+
+const fetchAdmins = async () => {
+  try {
+    const res = await axiosClient.get("/api/v1/users?role=admin-tabulator");
+    allEligibleUsers.value = res.data || [];
+  } catch {
+    toast.error("Failed to load statisticians");
+  }
+};
+
+onMounted(fetchAdmins);
+
+watch(
+  () => props.event,
+  (event) => {
+    if (event) {
+      form.value = {
+        event_name: event.event_name || "",
+        venue: event.venue || "",
+        event_code: event.event_code || "",
+        start_date: DateUtils.toFlatPickrFormat(event.start_date),
+        end_date: DateUtils.toFlatPickrFormat(event.end_date),
+        description: event.description || "",
+      };
+      selectedStatisticians.value = event.statisticians || [];
+      previewUrl.value = event.cover_photo
+        ? getImageUrl(event.cover_photo)
+        : "/vsu.png";
+      selectedFile.value = null;
+    }
+  },
+  { immediate: true }
+);
+
 const flatPickrConfig = {
   enableTime: true,
   dateFormat: "Y-m-d H:i",
@@ -45,27 +82,6 @@ const endDateConfig = computed(() => ({
   minDate: form.value.start_date || new Date(),
 }));
 
-watch(
-  () => props.event,
-  (event) => {
-    if (event) {
-      form.value = {
-        event_name: event.event_name || "",
-        venue: event.venue || "",
-        event_code: event.event_code || "",
-        start_date: DateUtils.toFlatPickrFormat(event.start_date),
-        end_date: DateUtils.toFlatPickrFormat(event.end_date),
-        description: event.description || "",
-      };
-      previewUrl.value = event.cover_photo
-        ? getImageUrl(event.cover_photo)
-        : "/vsu.png";
-      selectedFile.value = null;
-    }
-  },
-  { immediate: true }
-);
-
 function getImageUrl(filePath) {
   const base = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
   return filePath.startsWith("/storage/")
@@ -76,18 +92,15 @@ function getImageUrl(filePath) {
 const handleFileChange = (e) => {
   const file = e.target.files[0];
   if (!file) return;
-
   const validTypes = ["image/jpeg", "image/png", "image/jpg", "image/gif"];
   if (!validTypes.includes(file.type)) {
     toast.error("Invalid image type.");
     return;
   }
-
   if (file.size > 5 * 1024 * 1024) {
     toast.error("File must not exceed 5MB.");
     return;
   }
-
   selectedFile.value = file;
   previewUrl.value = URL.createObjectURL(file);
 };
@@ -104,6 +117,7 @@ const handleSubmit = () => {
   formData.append("event_name", form.value.event_name || "");
   formData.append("venue", form.value.venue || "");
   formData.append("description", form.value.description || "");
+  formData.append("statisticians", JSON.stringify(selectedStatisticians.value));
   if (form.value.start_date)
     formData.append(
       "start_date",
@@ -163,7 +177,6 @@ const handleSubmit = () => {
 
       <form @submit.prevent="handleSubmit" class="space-y-4">
         <div class="space-y-4">
-          <!-- Event Name -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">
               Event Name *
@@ -176,7 +189,6 @@ const handleSubmit = () => {
             />
           </div>
 
-          <!-- Venue -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">
               Venue
@@ -188,7 +200,6 @@ const handleSubmit = () => {
             />
           </div>
 
-          <!-- Start Date with FlatPickr -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">
               Start Date
@@ -196,13 +207,11 @@ const handleSubmit = () => {
             <FlatPickr
               v-model="form.start_date"
               :config="flatPickrConfig"
-              @on-change="onStartDateChange"
               class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               placeholder="Select start date and time"
             />
           </div>
 
-          <!-- End Date with FlatPickr -->
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">
               End Date
@@ -210,7 +219,6 @@ const handleSubmit = () => {
             <FlatPickr
               v-model="form.end_date"
               :config="endDateConfig"
-              @on-change="onEndDateChange"
               class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               placeholder="Select end date and time"
             />
@@ -225,6 +233,31 @@ const handleSubmit = () => {
               class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
               rows="4"
             ></textarea>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Statisticians
+            </label>
+            <select
+              v-model="selectedStatisticians"
+              multiple
+              class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-green-500"
+            >
+              <option
+                v-for="user in allEligibleUsers"
+                :key="user.user_id"
+                :value="{
+                  id: user.user_id,
+                  name: user.first_name + ' ' + user.last_name,
+                }"
+              >
+                {{ user.first_name }} {{ user.last_name }}
+              </option>
+            </select>
+            <p class="text-xs text-gray-500 mt-1">
+              Hold Ctrl (Cmd) to select multiple.
+            </p>
           </div>
 
           <div class="flex justify-end gap-3 mt-6">
