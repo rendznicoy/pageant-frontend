@@ -23,9 +23,9 @@ const refreshDashboard = async () => {
     <div class="flex justify-center items-center py-6 h-24 relative">
       <div class="relative">
         <img
-          src="/VSU Logo.png"
-          alt="VSU Logo"
-          class="h-14 hover:opacity-90 cursor-pointer"
+          src="/PSV.png"
+          alt="PSV Logo"
+          class="h-30 mt-8 hover:opacity-90 cursor-pointer"
           @click="refreshDashboard"
           :class="{ 'opacity-50': isRefreshing }"
         />

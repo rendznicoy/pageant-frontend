@@ -21,6 +21,7 @@ import CandidatesTab from "@/components/dashboard/CandidatesTab.vue";
 import JudgesTab from "@/components/dashboard/JudgesTab.vue";
 import CategoriesTab from "@/components/dashboard/CategoriesTab.vue";
 import ResultsTab from "@/components/dashboard/ResultsTab.vue";
+import ScoresTab from "@/components/dashboard/ScoresTab.vue";
 import StageManagementTab from "@/components/dashboard/StageManagementTab.vue";
 import ChangeDivisionModal from "@/components/ui/ChangeDivisionModal.vue";
 
@@ -55,7 +56,8 @@ const tabs = computed(() => [
   { id: "candidates", label: "Candidates", disabled: false },
   { id: "judges", label: "Judges", disabled: false },
   { id: "categories", label: "Categories", disabled: false },
-  { id: "results", label: "Results", disabled: true },
+  { id: "scores", label: "Scores", disabled: false },
+  { id: "results", label: "Results", disabled: false },
   {
     id: "stage-management",
     label: "Stage Management",
@@ -503,6 +505,7 @@ watch(activeTab, (newTab) => {
                   v-if="activeTab === 'categories'"
                   :event-id="eventId"
                 />
+                <ScoresTab v-if="activeTab === 'scores'" :event-id="eventId" />
                 <ResultsTab
                   v-if="activeTab === 'results'"
                   :event-id="eventId"

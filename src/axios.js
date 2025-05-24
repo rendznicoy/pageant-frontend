@@ -25,7 +25,10 @@ const fetchCsrfToken = async () => {
 
 axiosClient.interceptors.request.use(async (config) => {
   // Fetch CSRF token for non-GET requests if not present
-  if (["post", "put", "patch", "delete"].includes(config.method)) {
+  if (
+    config?.method &&
+    ["post", "put", "patch", "delete"].includes(config.method)
+  ) {
     const xsrfToken = document.cookie
       .split("; ")
       .find((row) => row.startsWith("XSRF-TOKEN="))
@@ -41,7 +44,7 @@ axiosClient.interceptors.request.use(async (config) => {
     config.headers.Authorization = `Bearer ${token}`;
     console.log("Added token to request:", token, "URL:", config.url);
   } else {
-    console.warn("No token found for request:", config.url);
+    console.warn("No token found for request:", config.url ?? "unknown URL");
   }
 
   if (config.data instanceof FormData) {
@@ -63,23 +66,30 @@ axiosClient.interceptors.request.use(async (config) => {
     config.headers["X-XSRF-TOKEN"] = decodeURIComponent(xsrfToken);
     console.log("Added XSRF-TOKEN to request:", xsrfToken);
   } else {
-    console.warn("No XSRF-TOKEN found in cookies for request:", config.url);
+    console.warn(
+      "No XSRF-TOKEN found in cookies for request:",
+      config.url ?? "[unknown URL]"
+    );
   }
 
   return config;
 });
 
 axiosClient.interceptors.response.use(
-  (response) => response.data, // ✅ Return only the .data part
+  (response) => {
+    const contentType = response.headers?.["content-type"] ?? "";
+
+    if (
+      contentType.includes("application/octet-stream") ||
+      contentType.includes("text/csv")
+    ) {
+      return response; // for file downloads
+    }
+
+    return response.data; // Default for API responses
+  },
   (error) => {
     if (error.response?.status === 401) {
-      console.error("Unauthorized request", {
-        url: error.config?.url,
-        method: error.config?.method,
-        headers: error.config?.headers,
-        data: error.config?.data,
-        response: error.response?.data,
-      });
       localStorage.removeItem("token");
       router.push({ name: "Login" });
       return Promise.resolve();

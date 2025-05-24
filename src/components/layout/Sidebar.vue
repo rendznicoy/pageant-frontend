@@ -50,7 +50,6 @@ const profileImageUrl = computed(() => {
   if (photo.startsWith("http://") || photo.startsWith("https://")) {
     return photo;
   }
-
   console.log("Resolved image URL:", profileImageUrl.value);
 
   return `${BACKEND_BASE_URL}/${photo}`;

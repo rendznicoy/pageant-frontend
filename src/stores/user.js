@@ -18,11 +18,13 @@ export const useUserStore = defineStore("user", () => {
       const res = await axiosClient.get("/api/v1/user");
 
       // Since you're using UserResource, the user data is under res.data.data
-      if (res && res.data) {
-        user.value = res.data.data ?? res.data;
-        userId.value = user.value.user_id;
-        judgeId.value = user.value.judge_id || null;
-        return true;
+      if (res?.data?.data) {
+        user.value = res.data.data;
+      } else if (res?.data) {
+        user.value = res.data;
+      } else {
+        console.warn("User response format unexpected:", res);
+        return false;
       }
 
       console.warn("No user data in response");
