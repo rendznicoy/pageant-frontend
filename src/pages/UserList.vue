@@ -2,12 +2,10 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRouter } from "vue-router";
 import { useUserStore } from "@/stores/user";
-import { useSidebarStore } from "@/sidebar";
+import { useDarkModeStore } from "@/stores/darkMode";
 import { useToast } from "vue-toastification";
 import axiosClient from "@/axios";
 import { useWindowSize } from "@/composables/useWindowSize";
-import Navbar from "@/components/layout/Navbar.vue";
-import Sidebar from "@/components/layout/Sidebar.vue";
 import CreateUserForm from "@/components/forms/CreateUserForm.vue";
 import EditUserForm from "@/components/forms/EditUserForm.vue";
 import DeleteUserModal from "@/components/forms/DeleteUserModal.vue";
@@ -16,9 +14,8 @@ import Breadcrumbs from "@/components/layout/Breadcrumbs.vue";
 
 const router = useRouter();
 const userStore = useUserStore();
-const sidebar = useSidebarStore();
+const darkModeStore = useDarkModeStore();
 const toast = useToast();
-const { windowWidth } = useWindowSize();
 const searchTerm = ref("");
 
 const users = ref([]);
@@ -36,6 +33,9 @@ const showCreateModal = ref(false);
 const showRoleConfirmModal = ref(false);
 const roleChangeTarget = ref(null);
 const pendingRole = ref(null);
+const isLoading = ref(false);
+
+const isDarkMode = computed(() => darkModeStore.isDarkMode);
 
 // Edit user modal
 const showEditModal = ref(false);
@@ -52,18 +52,12 @@ const editUser = ref({
 
 const breadcrumbItems = [
   { label: "Home", to: "/admin/dashboard" },
-  { label: "Admin", to: "#" },
-  { label: "Users" },
+  { label: "Users", to: "#" },
 ];
 
 // Delete confirmation
 const showDeleteConfirm = ref(false);
 const userToDelete = ref(null);
-
-// Dynamic layout shift
-const layoutShift = computed(() =>
-  sidebar.isOpen && windowWidth.value >= 1024 ? "ml-64" : "ml-0"
-);
 
 // Select All checkbox state
 const allSelected = computed({
@@ -91,6 +85,7 @@ const someSelected = computed(
 
 // Fetch users
 const fetchUsers = async () => {
+  isLoading.value = true;
   try {
     const params = filterRole.value ? { role: filterRole.value } : {};
     const response = await axiosClient.get("/api/v1/users", { params });
@@ -112,6 +107,8 @@ const fetchUsers = async () => {
       serverError.value = error.response?.data?.message || fallbackMessage;
       toast.error(serverError.value);
     }
+  } finally {
+    isLoading.value = false;
   }
 };
 
@@ -474,36 +471,59 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-100 overflow-auto">
-    <Navbar />
-    <Sidebar />
-
-    <div class="transition-all duration-300" :class="layoutShift">
+  <div
+    class="min-h-screen overflow-auto transition-colors duration-300"
+    :class="isDarkMode ? 'bg-gray-900' : 'bg-gray-100'"
+  >
+    <div class="transition-all duration-300">
       <!-- Breadcrumbs -->
       <div class="mt-4 mx-4 rounded-lg">
-        <Breadcrumbs :items="breadcrumbItems" />
+        <Breadcrumbs
+          :items="[{ label: 'Home', to: 'auto' }, { label: 'Users' }]"
+        />
       </div>
 
       <!-- Main Card -->
-      <div class="bg-white rounded-lg shadow-md p-6 mt-4 mx-4">
+      <div
+        class="rounded-lg shadow-md p-6 mt-4 mx-4 transition-colors duration-300"
+        :class="isDarkMode ? 'bg-gray-800' : 'bg-white'"
+      >
         <!-- Header -->
         <div class="flex justify-between items-center pt-2 pb-0 mb-4">
           <div class="flex items-center space-x-2">
-            <i class="fas fa-users text-green-600 text-2xl mb-1"></i>
-            <h1 class="text-lg font-bold text-green-800">User Management</h1>
+            <i
+              class="fas fa-users text-2xl mb-1 transition-colors duration-200"
+              :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+            ></i>
+            <h1
+              class="text-lg font-bold transition-colors duration-200"
+              :class="isDarkMode ? 'text-green-300' : 'text-green-800'"
+            >
+              User Management
+            </h1>
           </div>
           <div class="flex space-x-2">
             <button
               v-if="selectedUsers.length"
               @click="deleteSelected"
-              class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none transition-colors"
+              class="px-4 py-2 text-white rounded-md focus:outline-none transition-colors duration-200"
+              :class="
+                isDarkMode
+                  ? 'bg-red-700 hover:bg-red-600'
+                  : 'bg-red-600 hover:bg-red-700'
+              "
             >
               <i class="fas fa-trash mr-2"></i>
               Delete Selected
             </button>
             <button
               @click="showCreateModal = true"
-              class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none transition-colors"
+              class="px-4 py-2 text-white rounded-md focus:outline-none transition-colors duration-200"
+              :class="
+                isDarkMode
+                  ? 'bg-green-700 hover:bg-green-600'
+                  : 'bg-green-600 hover:bg-green-700'
+              "
             >
               <i class="fas fa-plus mr-2"></i>
               Add User
@@ -514,14 +534,26 @@ onUnmounted(() => {
         <!-- Server Error -->
         <div
           v-if="serverError"
-          class="bg-red-200 border border-red-500 text-red-800 px-4 py-3 rounded relative mb-4"
+          class="border px-4 py-3 rounded relative mb-4 transition-colors duration-300"
+          :class="
+            isDarkMode
+              ? 'bg-red-900/30 border-red-400 text-red-300'
+              : 'bg-red-200 border-red-500 text-red-800'
+          "
           role="alert"
         >
           <span class="block sm:inline">{{ serverError }}</span>
         </div>
 
         <!-- Filters and Search -->
-        <div class="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+        <div
+          class="border rounded-lg p-4 mb-6 transition-colors duration-300"
+          :class="
+            isDarkMode
+              ? 'bg-gray-700 border-gray-600'
+              : 'bg-white border-gray-200'
+          "
+        >
           <div
             class="flex flex-col md:flex-row justify-between items-center gap-4"
           >
@@ -534,46 +566,37 @@ onUnmounted(() => {
                 <div
                   class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
                 >
-                  <i class="fas fa-filter text-green-600 text-sm"></i>
+                  <i
+                    class="fas fa-filter text-sm transition-colors duration-200"
+                    :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+                  ></i>
                 </div>
 
                 <!-- Right chevron icon -->
                 <div
                   class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
                 >
-                  <i class="fas fa-chevron-down text-green-600 text-sm"></i>
+                  <i
+                    class="fas fa-chevron-down text-sm transition-colors duration-200"
+                    :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+                  ></i>
                 </div>
 
                 <!-- Dropdown select -->
                 <select
                   v-model="filterRole"
                   @change="fetchUsers"
-                  class="block w-full appearance-none border border-green-300 rounded-lg pl-10 pr-8 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600 bg-white hover:bg-green-50"
+                  class="block w-full appearance-none border rounded-lg pl-10 pr-8 py-2 text-sm focus:outline-none focus:ring-2 transition-colors duration-200"
+                  :class="
+                    isDarkMode
+                      ? 'border-green-600 bg-gray-600 text-gray-300 focus:ring-green-400 hover:bg-gray-500'
+                      : 'border-green-300 bg-white text-gray-700 focus:ring-green-600 hover:bg-green-50'
+                  "
                 >
-                  <option
-                    value=""
-                    class="bg-white hover:bg-green-50 text-gray-700"
-                  >
-                    All Roles
-                  </option>
-                  <option
-                    value="admin"
-                    class="bg-white hover:bg-green-50 text-gray-700"
-                  >
-                    Admin
-                  </option>
-                  <option
-                    value="tabulator"
-                    class="bg-white hover:bg-green-50 text-gray-700"
-                  >
-                    Tabulator
-                  </option>
-                  <option
-                    value="judge"
-                    class="bg-white hover:bg-green-50 text-gray-700"
-                  >
-                    Judge
-                  </option>
+                  <option value="">All Roles</option>
+                  <option value="admin">Admin</option>
+                  <option value="tabulator">Tabulator</option>
+                  <option value="judge">Judge</option>
                 </select>
               </div>
             </div>
@@ -581,13 +604,19 @@ onUnmounted(() => {
             <!-- Search -->
             <div class="relative w-full md:w-300">
               <i
-                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-green-600"
+                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 transition-colors duration-200"
+                :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
               ></i>
               <input
                 v-model="searchTerm"
                 type="search"
                 placeholder="Search by name or email"
-                class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg w-full focus:outline-none focus:ring-2 focus:ring-green-600 text-sm"
+                class="pl-10 pr-4 py-2 border rounded-lg w-full focus:outline-none focus:ring-2 text-sm transition-colors duration-200"
+                :class="
+                  isDarkMode
+                    ? 'border-gray-600 bg-gray-600 text-gray-100 focus:ring-green-400 placeholder-gray-400'
+                    : 'border-gray-300 bg-white text-gray-900 focus:ring-green-600 placeholder-gray-500'
+                "
               />
             </div>
           </div>
@@ -601,13 +630,31 @@ onUnmounted(() => {
             <div
               v-for="user in paginatedUsers"
               :key="user?.user_id"
-              class="bg-white rounded-lg border border-gray-200 shadow-md p-4 flex flex-col relative hover:shadow-lg transition"
+              class="rounded-lg border shadow-md p-4 flex flex-col relative transition-all duration-300"
+              :class="
+                isDarkMode
+                  ? 'bg-gray-700 border-gray-600 hover:shadow-gray-800/40'
+                  : 'bg-white border-gray-200 hover:shadow-lg'
+              "
               name="card"
             >
               <!-- delete icon -->
               <div class="absolute top-2 right-2">
-                <button @click="confirmDelete(user)">
-                  <i class="fas fa-trash text-red-500 hover:text-red-700"></i>
+                <button
+                  @click="confirmDelete(user)"
+                  class="p-1 rounded-full transition-colors duration-200"
+                  :class="
+                    isDarkMode ? 'hover:bg-gray-600' : 'hover:bg-gray-100'
+                  "
+                >
+                  <i
+                    class="fas fa-trash transition-colors duration-200"
+                    :class="
+                      isDarkMode
+                        ? 'text-red-400 hover:text-red-300'
+                        : 'text-red-500 hover:text-red-700'
+                    "
+                  ></i>
                 </button>
               </div>
 
@@ -616,26 +663,41 @@ onUnmounted(() => {
                 <img
                   :src="user.profile_photo || '/user24.png'"
                   alt="Profile"
-                  class="w-16 h-16 rounded-full object-cover border-2 border-green-500 shadow-sm"
+                  class="w-16 h-16 rounded-full object-cover border-2 shadow-sm transition-colors duration-200"
+                  :class="isDarkMode ? 'border-green-400' : 'border-green-500'"
                   @error="handleImageError"
                 />
               </div>
+
               <!-- Name -->
-              <h3 class="text-lg font-semibold text-center mb-2">
+              <h3
+                class="text-lg font-semibold text-center mb-2 transition-colors duration-200"
+                :class="isDarkMode ? 'text-gray-100' : 'text-gray-900'"
+              >
                 {{ user.first_name }} {{ user.last_name }}
               </h3>
+
               <!-- Email -->
               <div
-                class="flex items-center justify-start text-sm text-gray-600 mb-1"
+                class="flex items-center justify-start text-sm mb-1 transition-colors duration-200"
+                :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
               >
-                <i class="fas fa-envelope mr-2 text-green-600"></i>
+                <i
+                  class="fas fa-envelope mr-2 transition-colors duration-200"
+                  :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+                ></i>
                 <span class="truncate">{{ user.email }}</span>
               </div>
+
               <!-- Username -->
               <div
-                class="flex items-center justify-start text-xs text-gray-500 mb-3"
+                class="flex items-center justify-start text-xs mb-3 transition-colors duration-200"
+                :class="isDarkMode ? 'text-gray-500' : 'text-gray-500'"
               >
-                <i class="fas fa-user mr-2 text-green-600"></i>
+                <i
+                  class="fas fa-user mr-2 transition-colors duration-200"
+                  :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+                ></i>
                 <span class="truncate">{{ user.username }}</span>
               </div>
 
@@ -644,13 +706,16 @@ onUnmounted(() => {
                 class="relative mt-2 w-full flex justify-center role-dropdown"
               >
                 <button
-                  class="inline-flex items-center justify-center px-3 py-1 text-sm font-medium rounded-full transition"
-                  :class="{
-                    'bg-green-100 text-green-800 hover:bg-green-200':
-                      user.role !== 'judge',
-                    'bg-gray-100 text-gray-500 cursor-not-allowed':
-                      user.role === 'judge',
-                  }"
+                  class="inline-flex items-center justify-center px-3 py-1 text-sm font-medium rounded-full transition-colors duration-200"
+                  :class="
+                    user.role !== 'judge'
+                      ? isDarkMode
+                        ? 'bg-green-900/30 text-green-300 hover:bg-green-800/40'
+                        : 'bg-green-100 text-green-800 hover:bg-green-200'
+                      : isDarkMode
+                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
+                      : 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                  "
                   :disabled="user.role === 'judge'"
                   @click="
                     user.role !== 'judge' && toggleRoleDropdown(user.user_id)
@@ -674,13 +739,23 @@ onUnmounted(() => {
                 <!-- Role Options -->
                 <div
                   v-if="dropdownVisible === user.user_id"
-                  class="absolute z-10 mt-2 w-40 bg-white border border-gray-200 rounded shadow-lg"
+                  class="absolute z-10 mt-2 w-40 border rounded shadow-lg transition-colors duration-200"
+                  :class="
+                    isDarkMode
+                      ? 'bg-gray-600 border-gray-500'
+                      : 'bg-white border-gray-200'
+                  "
                 >
                   <button
                     v-for="option in ['admin', 'tabulator']"
                     :key="option"
                     :disabled="user.role === option"
-                    class="flex items-center w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-green-100 disabled:opacity-40 disabled:cursor-not-allowed"
+                    class="flex items-center w-full px-4 py-2 text-sm text-left transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+                    :class="
+                      isDarkMode
+                        ? 'text-gray-300 hover:bg-green-800/30'
+                        : 'text-gray-700 hover:bg-green-100'
+                    "
                     @click.prevent="confirmRoleChange(user, option)"
                   >
                     <i
@@ -700,9 +775,17 @@ onUnmounted(() => {
 
         <!-- Pagination Controls -->
         <div
-          class="bg-white border border-gray-200 rounded-lg shadow-md p-4 mt-6 mx-4 flex justify-between items-center"
+          class="border rounded-lg shadow-md p-4 mt-6 mx-4 flex justify-between items-center transition-colors duration-300"
+          :class="
+            isDarkMode
+              ? 'bg-gray-700 border-gray-600'
+              : 'bg-white border-gray-200'
+          "
         >
-          <span class="text-sm text-green-600">
+          <span
+            class="text-sm transition-colors duration-200"
+            :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+          >
             Showing {{ (currentPage - 1) * itemsPerPage + 1 }} to
             {{
               Math.min(
@@ -714,18 +797,24 @@ onUnmounted(() => {
           </span>
 
           <div
-            class="flex items-center border border-gray-200 rounded overflow-hidden shadow-sm"
+            class="flex items-center border rounded overflow-hidden shadow-sm"
           >
             <button
               @click="goToPage(currentPage - 1)"
               :disabled="currentPage === 1"
-              class="px-3 py-1 bg-white text-green-600 hover:bg-gray-100 disabled:opacity-40"
+              class="px-3 py-1 transition-colors duration-200 disabled:opacity-40"
+              :class="
+                isDarkMode
+                  ? 'bg-gray-600 text-green-400 hover:bg-gray-500'
+                  : 'bg-white text-green-600 hover:bg-gray-100'
+              "
             >
               <i class="fas fa-chevron-left"></i>
             </button>
 
             <span
-              class="px-4 py-1.5 bg-green-600 text-white text-sm font-semibold select-none"
+              class="px-4 py-1.5 text-white text-sm font-semibold select-none transition-colors duration-200"
+              :class="isDarkMode ? 'bg-green-700' : 'bg-green-600'"
             >
               {{ currentPage }}
             </span>
@@ -733,7 +822,12 @@ onUnmounted(() => {
             <button
               @click="goToPage(currentPage + 1)"
               :disabled="currentPage === totalPages"
-              class="px-3 py-1 bg-white text-green-600 hover:bg-gray-100 disabled:opacity-40"
+              class="px-3 py-1 transition-colors duration-200 disabled:opacity-40"
+              :class="
+                isDarkMode
+                  ? 'bg-gray-600 text-green-400 hover:bg-gray-500'
+                  : 'bg-white text-green-600 hover:bg-gray-100'
+              "
             >
               <i class="fas fa-chevron-right"></i>
             </button>
@@ -743,31 +837,51 @@ onUnmounted(() => {
         <!-- Role Change Confirmation Modal -->
         <div
           v-if="showRoleConfirmModal"
-          class="fixed inset-0 z-50 bg-black bg-opacity-40 flex items-center justify-center"
+          class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          :class="isDarkMode ? 'bg-black/60' : 'bg-black/40'"
         >
-          <div class="bg-white p-6 rounded-lg shadow-md w-full max-w-md">
-            <h3 class="text-lg font-bold text-gray-800 mb-4">
+          <div
+            class="p-6 rounded-lg shadow-md w-full max-w-md transition-colors duration-300"
+            :class="isDarkMode ? 'bg-gray-800' : 'bg-white'"
+          >
+            <h3
+              class="text-lg font-bold mb-4 transition-colors duration-200"
+              :class="isDarkMode ? 'text-gray-200' : 'text-gray-800'"
+            >
               Confirm Role Change
             </h3>
-            <p class="text-sm text-gray-700 mb-6">
+            <p
+              class="text-sm mb-6 transition-colors duration-200"
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+            >
               Are you sure you want to change the role of
-              <strong>
-                {{ roleChangeTarget?.first_name }}
-                {{ roleChangeTarget?.last_name }}
-              </strong>
+              <strong
+                >{{ roleChangeTarget?.first_name }}
+                {{ roleChangeTarget?.last_name }}</strong
+              >
               to <strong class="capitalize">{{ pendingRole }}</strong
               >?
             </p>
             <div class="flex justify-end gap-3">
               <button
                 @click="showRoleConfirmModal = false"
-                class="px-4 py-2 text-sm bg-gray-300 hover:bg-gray-400 rounded"
+                class="px-4 py-2 text-sm rounded transition-colors duration-200"
+                :class="
+                  isDarkMode
+                    ? 'bg-gray-600 text-gray-300 hover:bg-gray-500'
+                    : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+                "
               >
                 Cancel
               </button>
               <button
                 @click="updateUserRole"
-                class="px-4 py-2 text-sm bg-green-600 text-white hover:bg-green-700 rounded"
+                class="px-4 py-2 text-sm text-white rounded transition-colors duration-200"
+                :class="
+                  isDarkMode
+                    ? 'bg-green-700 hover:bg-green-600'
+                    : 'bg-green-600 hover:bg-green-700'
+                "
               >
                 Confirm
               </button>

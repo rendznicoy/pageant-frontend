@@ -1,11 +1,27 @@
 <script>
 import { useUserStore } from "@/stores/user";
+import { useDarkModeStore } from "@/stores/darkMode";
+import { computed } from "vue";
 import axiosClient from "@/axios";
 import Pusher from "pusher-js";
 import { useToast } from "vue-toastification";
 import { useRouter } from "vue-router";
+import EventInfoCard from "@/components/dashboard/EventInfoCard.vue";
+import JudgeDetailsCard from "@/components/dashboard/JudgeDetailsCard.vue";
+import CurrentCandidateCard from "@/components/dashboard/CurrentCandidateCard.vue";
+import ScoreInputForm from "@/components/dashboard/ScoreInputForm.vue";
+import TemporaryScoreCard from "@/components/dashboard/TemporaryScoreCard.vue";
+import DarkModeToggle from "@/components/dashboard/DarkModeToggle.vue";
 
 export default {
+  components: {
+    EventInfoCard,
+    JudgeDetailsCard,
+    CurrentCandidateCard,
+    ScoreInputForm,
+    TemporaryScoreCard,
+    DarkModeToggle,
+  },
   data() {
     return {
       event: null,
@@ -26,32 +42,59 @@ export default {
       showConfirmModal: false,
       pollingInterval: null,
       dataLoaded: false,
+      rejectedTemporaryScore: false,
+      maxScore: 100,
+      isNavbarVisible: true,
+      lastScrollY: 0,
+      scrollThreshold: 10,
+      darkModeStore: useDarkModeStore(),
     };
+  },
+  computed: {
+    isDarkMode() {
+      // This is always reactive with Pinia!
+      return this.darkModeStore.isDarkMode;
+    },
   },
   setup() {
     const userStore = useUserStore();
     const toast = useToast();
     const router = useRouter();
+
     return { userStore, toast, router };
   },
   watch: {
     score(newValue) {
       console.log("Score updated:", newValue, typeof newValue);
     },
+    // Watch for dark mode changes and apply to DOM
+    isDarkMode(newVal) {
+      if (newVal) {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    },
   },
   mounted() {
+    useDarkModeStore().initializeDarkMode();
     console.log("Stored token:", localStorage.getItem("token"));
+
+    // Initialize dark mode from store
+    this.addScrollListener();
+
     // Add FontAwesome script dynamically if not already present
     if (!document.getElementById("font-awesome-script")) {
       const script = document.createElement("script");
       script.id = "font-awesome-script";
       script.src =
-        "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/js/all.min.js";
+        "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js";
       script.integrity =
-        "sha512-Tn2m0TIpgVyTzzvmxLNuqbSJH3JP8jm+Cy3hvHrW7ndTDcJ1w5mBiksqDBb8GpE2ksktFvDB/ykZ0mDpsZj20w==";
+        "sha512-fD9DI5bZwQxOi7MhYWnnNPlvXdp/2Pj3XSTRrFs5FQa4mizyGLnJcN6tuvUS6LbmgN1ut+XGSABKvjN0H6Aoow==";
       script.crossOrigin = "anonymous";
       document.head.appendChild(script);
     }
+
     this.initializePusher();
     this.fetchCurrentSession();
     this.startPolling();
@@ -63,8 +106,21 @@ export default {
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
     }
+    // Remove scroll listener
+    this.removeScrollListener();
   },
   methods: {
+    toggleDarkMode() {
+      useDarkModeStore().toggle();
+    },
+    initializeDarkMode() {
+      useDarkModeStore().initializeDarkMode();
+      if (this.isDarkMode) {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    },
     initializePusher() {
       this.pusher = new Pusher(import.meta.env.VITE_PUSHER_APP_KEY, {
         cluster: import.meta.env.VITE_PUSHER_APP_CLUSTER,
@@ -111,6 +167,8 @@ export default {
         this.next_candidate = response.next_candidate;
         this.criteria = response.criteria;
         this.currentCandidateId = newCandidateId;
+        this.event = response.event;
+        this.maxScore = response.event?.max_score || 100;
 
         // Handle candidate change - reset form completely for new candidates
         if (isNewCandidate && newCandidateId !== null) {
@@ -120,6 +178,7 @@ export default {
           this.temporaryScore = null;
           this.hasConfirmedScore = false;
           this.isWaitingForNextCandidate = false;
+          this.rejectedTemporaryScore = false; // Reset flag for new candidate
         }
 
         // Handle score status based on API response
@@ -129,7 +188,11 @@ export default {
             this.hasConfirmedScore = true;
             this.isWaitingForNextCandidate = true;
             this.temporaryScore = null;
-          } else if (response.score_status === "temporary") {
+          } else if (
+            response.score_status === "temporary" &&
+            !this.rejectedTemporaryScore
+          ) {
+            // Only restore temporary score if it hasn't been rejected
             console.log("Temporary score exists, restoring state");
             this.hasConfirmedScore = false;
             this.isWaitingForNextCandidate = false;
@@ -151,8 +214,8 @@ export default {
               }
             }
           } else {
-            // No score exists - fresh state
-            console.log("No score exists, fresh state");
+            // No score exists or temporary score was rejected - fresh state
+            console.log("No score exists or was rejected, fresh state");
             this.hasConfirmedScore = false;
             this.isWaitingForNextCandidate = false;
             this.temporaryScore = null;
@@ -171,6 +234,7 @@ export default {
           isWaitingForNextCandidate: this.isWaitingForNextCandidate,
           scoreStatus: response.score_status,
           temporaryScore: this.temporaryScore,
+          rejectedTemporaryScore: this.rejectedTemporaryScore,
         });
 
         // Handle event completion
@@ -278,7 +342,7 @@ export default {
           console.log("Polling: Fetching session update");
           this.fetchCurrentSession();
         }
-      }, 5000); // Reduced to 5 seconds for better responsiveness
+      }, 10000); // Reduced to 60 seconds for better responsiveness
     },
     validateScore() {
       if (this.score == null) {
@@ -288,11 +352,12 @@ export default {
         this.toast.error("Score field is required");
         return false;
       }
-      if (this.score < 0 || this.score > 100) {
+      if (this.score < 0 || this.score > this.maxScore) {
         console.debug("Score validation failed: Score out of range", {
           score: this.score,
+          maxScore: this.maxScore,
         });
-        this.toast.error("Please enter a valid score (0-100)");
+        this.toast.error(`Please enter a valid score (0-${this.maxScore})`);
         return false;
       }
       return true;
@@ -300,14 +365,20 @@ export default {
     handleScoreInput(event) {
       let value = event.target.value;
       value = value.replace(/[^0-9]/g, "");
-      const numValue = value === "" ? null : parseInt(value, 10);
-      if (numValue !== null && numValue > 100) {
-        this.score = 100;
-        this.toast.warning("Score cannot exceed 100");
+
+      if (value === "") {
+        this.score = null;
+        return;
+      }
+
+      const numValue = parseInt(value, 10);
+      if (numValue > this.maxScore) {
+        this.score = this.maxScore;
+        event.target.value = this.maxScore.toString();
+        this.toast.warning(`Score cannot exceed ${this.maxScore}`);
       } else {
         this.score = numValue;
       }
-      event.target.value = this.score === null ? "" : this.score;
     },
     restrictScoreKeydown(event) {
       const allowedKeys = [
@@ -323,9 +394,9 @@ export default {
       if (/^[0-9]$/.test(event.key)) {
         const currentValue = event.target.value + event.key;
         const numValue = parseInt(currentValue, 10);
-        if (numValue > 100) {
+        if (numValue > this.maxScore) {
           event.preventDefault();
-          this.toast.warning("Score cannot exceed 100");
+          this.toast.warning(`Score cannot exceed ${this.maxScore}`);
         }
         return;
       }
@@ -373,6 +444,7 @@ export default {
           payload
         );
         this.temporaryScore = response.score;
+        this.rejectedTemporaryScore = false; // Reset the flag when new score is submitted
         this.toast.success("Score submitted, please confirm");
       } catch (error) {
         console.error("Submission error:", {
@@ -399,8 +471,17 @@ export default {
     async confirmScoreSubmission(confirmed) {
       this.showConfirmModal = false;
       if (!confirmed) {
+        // Set flag to indicate temporary score was rejected
+        this.rejectedTemporaryScore = true;
+
+        // Clear local state
+        this.temporaryScore = null;
+        this.score = null;
+        this.comments = "";
+        this.toast.info("Score cleared. You can enter a new score.");
         return;
       }
+
       this.isSubmitting = true;
       try {
         const payload = {
@@ -418,6 +499,7 @@ export default {
         this.comments = "";
         this.isWaitingForNextCandidate = true;
         this.hasConfirmedScore = true;
+        this.rejectedTemporaryScore = false; // Reset flag
         this.toast.success("Score confirmed");
       } catch (error) {
         this.toast.error(
@@ -429,380 +511,422 @@ export default {
         this.isSubmitting = false;
       }
     },
+    handleScroll() {
+      const currentScrollY = window.scrollY;
+
+      if (Math.abs(currentScrollY - this.lastScrollY) < this.scrollThreshold) {
+        return;
+      }
+
+      if (currentScrollY > this.lastScrollY && currentScrollY > 100) {
+        // Scrolling down & past threshold - hide navbar
+        this.isNavbarVisible = false;
+      } else {
+        // Scrolling up or at top - show navbar
+        this.isNavbarVisible = true;
+      }
+
+      this.lastScrollY = currentScrollY;
+    },
+    addScrollListener() {
+      window.addEventListener("scroll", this.handleScroll, { passive: true });
+    },
+
+    removeScrollListener() {
+      window.removeEventListener("scroll", this.handleScroll);
+    },
+
+    handleImageError(event) {
+      // Use Vue's nextTick to ensure DOM is ready
+      this.$nextTick(() => {
+        event.target.src = "/default-avatar.png";
+      });
+    },
   },
 };
 </script>
 
 <template>
-  <div class="min-h-screen bg-gradient-to-b from-blue-50 to-white">
-    <!-- Header Section -->
-    <header class="bg-green-600 text-white shadow-md">
+  <div
+    class="min-h-screen transition-colors duration-300"
+    :class="
+      isDarkMode
+        ? 'bg-gradient-to-b from-gray-900 to-gray-800'
+        : 'bg-gradient-to-b from-blue-50 to-white'
+    "
+  >
+    <!-- Enhanced Header Section with Scroll Behavior -->
+    <header
+      class="fixed top-0 left-0 right-0 z-50 transition-all duration-300 ease-in-out backdrop-blur-md"
+      :class="[
+        isNavbarVisible ? 'translate-y-0' : '-translate-y-full',
+        isDarkMode
+          ? 'bg-gray-800/90 border-gray-700'
+          : 'bg-white/90 border-gray-200',
+        'border-b shadow-lg',
+      ]"
+    >
       <div class="container mx-auto py-4 px-6">
-        <h1 class="text-3xl font-bold">Judge Dashboard</h1>
-        <p class="text-sm opacity-90">
-          {{ judge_name ? `Welcome, ${judge_name}` : "Loading..." }}
-        </p>
+        <div class="flex items-center justify-between">
+          <!-- Left: Title and Welcome -->
+          <div class="flex items-center space-x-4">
+            <div class="flex items-center space-x-3">
+              <div
+                class="p-2 rounded-lg transition-colors duration-300"
+                :class="
+                  isDarkMode
+                    ? 'bg-blue-600 hover:bg-blue-700'
+                    : 'bg-green-600 hover:bg-green-700'
+                "
+              >
+                <i class="fas fa-gavel text-white text-xl"></i>
+              </div>
+              <div>
+                <h1
+                  class="text-2xl font-bold transition-colors"
+                  :class="isDarkMode ? 'text-white' : 'text-gray-800'"
+                >
+                  Judge Dashboard
+                </h1>
+                <p
+                  class="text-sm transition-colors"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                >
+                  {{ judge_name ? `Welcome, ${judge_name}` : "Loading..." }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Status and Dark Mode Toggle -->
+          <div class="flex items-center space-x-4">
+            <!-- Event Status Badge -->
+            <div v-if="event" class="hidden sm:block">
+              <span
+                class="px-3 py-1 rounded-full text-xs font-medium transition-colors"
+                :class="{
+                  'bg-green-100 text-green-800 border border-green-200':
+                    event.status === 'active' && !isDarkMode,
+                  'bg-green-900/30 text-green-400 border border-green-800':
+                    event.status === 'active' && isDarkMode,
+                  'bg-red-100 text-red-800 border border-red-200':
+                    event.status === 'completed' && !isDarkMode,
+                  'bg-red-900/30 text-red-400 border border-red-800':
+                    event.status === 'completed' && isDarkMode,
+                  'bg-yellow-100 text-yellow-800 border border-yellow-200':
+                    event.status !== 'active' &&
+                    event.status !== 'completed' &&
+                    !isDarkMode,
+                  'bg-yellow-900/30 text-yellow-400 border border-yellow-800':
+                    event.status !== 'active' &&
+                    event.status !== 'completed' &&
+                    isDarkMode,
+                }"
+              >
+                <i class="fas fa-circle text-xs mr-1"></i>
+                {{
+                  event.status.charAt(0).toUpperCase() + event.status.slice(1)
+                }}
+              </span>
+            </div>
+
+            <!-- Dark Mode Toggle -->
+            <DarkModeToggle />
+          </div>
+        </div>
       </div>
     </header>
 
-    <!-- Main Content -->
-    <div class="container mx-auto px-6 py-8">
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Event Information Card -->
+    <!-- Main Content with Top Padding for Fixed Header -->
+    <div class="pt-20 container mx-auto px-6 py-8">
+      <!-- Enhanced Info Cards Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <!-- Event Information Card Component -->
+        <EventInfoCard
+          :event="event"
+          :isDarkMode="isDarkMode"
+          :date="new Date().toLocaleDateString()"
+        />
+
+        <!-- Judge's Details Card Component -->
+        <JudgeDetailsCard
+          :judgeName="judge_name"
+          :currentCategory="current_category"
+          :isDarkMode="isDarkMode"
+        />
+      </div>
+
+      <!-- Enhanced Current Candidate Section -->
+      <div class="transform transition-all duration-300">
         <div
-          class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
+          class="rounded-xl shadow-lg p-6 transition-all duration-300 border"
+          :class="
+            isDarkMode
+              ? 'bg-gray-800 border-gray-700 hover:bg-gray-800/90'
+              : 'bg-white border-gray-200 hover:bg-gray-50/50'
+          "
         >
-          <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
-            Event Information
-          </h2>
-          <div v-if="event" class="space-y-2">
-            <div class="flex items-center">
-              <div class="w-32 font-medium text-gray-600">Event Name:</div>
-              <div class="text-gray-800">{{ event.event_name }}</div>
+          <div class="flex items-center mb-6">
+            <div
+              class="p-2 rounded-lg mr-3 transition-colors duration-300"
+              :class="
+                isDarkMode
+                  ? 'bg-purple-900/30 text-purple-400'
+                  : 'bg-purple-600 text-white'
+              "
+            >
+              <i class="fas fa-star"></i>
             </div>
-            <div class="flex items-center">
-              <div class="w-32 font-medium text-gray-600">Date:</div>
-              <div class="text-gray-800">
-                {{ new Date().toLocaleDateString() }}
-              </div>
-            </div>
-            <div class="flex items-center">
-              <div class="w-32 font-medium text-gray-600">Location:</div>
-              <div class="text-gray-800">{{ event.venue || "TBA" }}</div>
-            </div>
-            <div class="flex items-center">
-              <div class="w-32 font-medium text-gray-600">Status:</div>
-              <div class="text-gray-800">
+            <h2
+              class="text-xl font-semibold transition-colors"
+              :class="isDarkMode ? 'text-white' : 'text-blue-800'"
+            >
+              Current Candidate
+            </h2>
+          </div>
+
+          <!-- Loading State -->
+          <template v-if="!dataLoaded">
+            <div class="flex items-center justify-center h-32">
+              <div class="flex items-center space-x-3">
+                <div
+                  class="animate-spin w-8 h-8 border-3 border-t-transparent rounded-full transition-colors"
+                  :class="
+                    isDarkMode
+                      ? 'border-blue-400 border-t-transparent'
+                      : 'border-blue-600 border-t-transparent'
+                  "
+                ></div>
                 <span
-                  :class="{
-                    'px-2 py-1 rounded text-xs font-medium': true,
-                    'bg-green-100 text-green-800': event.status === 'active',
-                    'bg-red-100 text-red-800': event.status === 'completed',
-                    'bg-yellow-100 text-yellow-800':
-                      event.status !== 'active' && event.status !== 'completed',
-                  }"
+                  class="text-lg transition-colors"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-400'"
                 >
-                  {{
-                    event.status.charAt(0).toUpperCase() + event.status.slice(1)
-                  }}
+                  Loading session details...
                 </span>
               </div>
             </div>
-          </div>
-          <div v-else class="flex items-center justify-center h-24">
-            <div class="animate-pulse text-gray-400">
-              Loading event information...
-            </div>
-          </div>
-        </div>
+          </template>
 
-        <!-- Judge's Details Card -->
-        <div
-          class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
-        >
-          <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
-            Judge's Details
-          </h2>
-          <div class="space-y-2">
-            <div class="flex items-center">
-              <div class="w-32 font-medium text-gray-600">Judge Name:</div>
-              <div class="text-gray-800">{{ judge_name || "Loading..." }}</div>
-            </div>
-            <div class="flex items-center">
-              <div class="w-32 font-medium text-gray-600">Category:</div>
-              <div class="text-gray-800">
-                {{ current_category?.category_name || "Not assigned" }}
-              </div>
-            </div>
-            <div v-if="current_category" class="flex items-center">
-              <div class="w-32 font-medium text-gray-600">Stage:</div>
-              <div class="text-gray-800">{{ current_category.stage_name }}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Current Candidate Section -->
-      <div
-        class="mt-8 bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg"
-      >
-        <h2 class="text-xl font-semibold text-blue-800 mb-4 border-b pb-2">
-          Current Candidate
-        </h2>
-
-        <!-- Loading State -->
-        <div v-if="!dataLoaded" class="flex items-center justify-center h-32">
-          <div class="animate-pulse text-gray-400">
-            Loading session details...
-          </div>
-        </div>
-
-        <!-- Event Completed -->
-        <div v-else-if="event?.status === 'completed'" class="text-center py-8">
-          <div class="text-3xl text-green-600 mb-4">
-            <i class="fas fa-check-circle"></i>
-          </div>
-          <p class="text-lg text-gray-700">The event has been finalized.</p>
-          <p class="text-gray-600">Thank you for your participation!</p>
-        </div>
-
-        <!-- Event Not Active -->
-        <div v-else-if="event?.status !== 'active'" class="text-center py-8">
-          <div class="text-3xl text-yellow-600 mb-4">
-            <i class="fas fa-exclamation-triangle"></i>
-          </div>
-          <p class="text-lg text-gray-700">Event is not currently active.</p>
-          <p class="text-gray-600">Please check back later.</p>
-        </div>
-
-        <!-- No Assigned Category or Candidate -->
-        <div
-          v-else-if="!current_category || !next_candidate"
-          class="text-center py-8"
-        >
-          <div class="text-3xl text-blue-600 mb-4">
-            <i class="fas fa-hourglass-half"></i>
-          </div>
-          <p class="text-lg text-gray-700">
-            {{
-              current_category && !next_candidate
-                ? "All candidates in this category have been scored."
-                : "No active category or candidate assigned for scoring."
-            }}
-          </p>
-          <p class="text-gray-600">Please await further instructions.</p>
-        </div>
-
-        <!-- Score Already Confirmed -->
-        <div
-          v-else-if="isWaitingForNextCandidate || hasConfirmedScore"
-          class="text-center py-8"
-        >
-          <div class="text-3xl text-green-600 mb-4">
-            <i class="fas fa-check-circle"></i>
-          </div>
-          <p class="text-lg text-gray-700">
-            {{
-              hasConfirmedScore
-                ? "Your score has been submitted and confirmed."
-                : "All candidates in this category have been scored."
-            }}
-          </p>
-          <p class="text-gray-600">
-            Please await the announcement of the next candidate or final
-            results.
-          </p>
-        </div>
-
-        <!-- Active Candidate Display -->
-        <div v-else class="transition-opacity duration-500 ease-in-out">
-          <div class="flex flex-col md:flex-row items-start">
-            <!-- Candidate Info -->
-            <div class="md:w-1/3 mb-6 md:mb-0">
-              <div class="flex items-center mb-4">
-                <div class="text-2xl font-bold text-gray-800">
-                  {{ next_candidate.first_name }} {{ next_candidate.last_name }}
-                </div>
+          <!-- Event Status Messages -->
+          <template v-else-if="event?.status === 'completed'">
+            <div class="text-center py-12">
+              <div class="mb-4">
                 <div
-                  class="ml-3 px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded"
+                  class="mx-auto w-16 h-16 rounded-full flex items-center justify-center transition-colors duration-300"
+                  :class="
+                    isDarkMode
+                      ? 'bg-green-900/30 text-green-400'
+                      : 'bg-green-100 text-green-600'
+                  "
                 >
-                  #{{ next_candidate.candidate_number }}
+                  <i class="fas fa-check-circle text-3xl"></i>
                 </div>
               </div>
-
-              <div class="relative">
-                <img
-                  v-if="next_candidate.photo"
-                  :src="getCandidatePhotoUrl(next_candidate.photo)"
-                  @error="event.target.src = '/default-avatar.png'"
-                  alt="Candidate Photo"
-                  class="w-48 h-48 object-cover rounded-lg shadow-md transition-transform duration-300 hover:scale-105"
-                />
-                <div
-                  v-else
-                  class="w-48 h-48 bg-gray-200 rounded-lg flex items-center justify-center text-gray-400"
-                >
-                  No photo available
-                </div>
-              </div>
-            </div>
-
-            <!-- Scoring Form -->
-            <div class="md:w-2/3 md:pl-8">
-              <!-- Temporary Score Display -->
-              <div
-                v-if="temporaryScore"
-                class="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-200"
+              <p
+                class="text-xl font-semibold mb-2 transition-colors"
+                :class="isDarkMode ? 'text-white' : 'text-gray-700'"
               >
-                <h3 class="text-lg font-semibold text-blue-800 mb-2">
-                  Temporary Score
-                </h3>
-                <div class="flex items-center mb-2">
-                  <div class="w-24 font-medium text-gray-600">Score:</div>
-                  <div class="text-xl font-bold text-blue-800">
-                    {{ temporaryScore.score }}
-                  </div>
-                </div>
-                <div class="flex items-start">
-                  <div class="w-24 font-medium text-gray-600">Comments:</div>
-                  <div class="text-gray-800">
-                    {{ temporaryScore.comments || "None" }}
-                  </div>
-                </div>
+                The event has been finalized.
+              </p>
+              <p
+                class="transition-colors"
+                :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+              >
+                Thank you for your participation!
+              </p>
+            </div>
+          </template>
 
-                <button
-                  @click="confirmScore"
-                  :disabled="isSubmitting"
-                  class="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          <!-- Event Not Active -->
+          <template v-else-if="event?.status !== 'active'">
+            <div class="text-center py-12">
+              <div class="mb-4">
+                <div
+                  class="mx-auto w-16 h-16 rounded-full flex items-center justify-center transition-colors duration-300"
+                  :class="
+                    isDarkMode
+                      ? 'bg-yellow-900/30 text-yellow-400'
+                      : 'bg-yellow-100 text-yellow-600'
+                  "
                 >
-                  <span v-if="isSubmitting" class="mr-2">
-                    <svg
-                      class="animate-spin h-5 w-5 text-white"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                  </span>
-                  Confirm Score
-                </button>
+                  <i class="fas fa-exclamation-triangle text-3xl"></i>
+                </div>
               </div>
+              <p
+                class="text-xl font-semibold mb-2 transition-colors"
+                :class="isDarkMode ? 'text-white' : 'text-gray-700'"
+              >
+                Event is not currently active.
+              </p>
+              <p
+                class="transition-colors"
+                :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+              >
+                Please check back later.
+              </p>
+            </div>
+          </template>
 
-              <!-- Score Input Form -->
-              <div v-else>
-                <div class="mb-6">
-                  <label
-                    for="score"
-                    class="block text-lg font-medium text-gray-700 mb-2"
-                    >Score (0-100):</label
-                  >
-                  <div class="relative">
-                    <input
-                      type="text"
-                      id="score"
-                      v-model="score"
-                      @input="handleScoreInput"
-                      @keydown="restrictScoreKeydown"
-                      :disabled="isSubmitting"
-                      placeholder="Enter score"
-                      class="border border-gray-300 rounded-lg px-4 py-3 w-full text-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300"
-                    />
-                    <div
-                      v-if="score !== null"
-                      class="absolute right-4 top-3 text-xl font-bold text-blue-600"
-                    >
-                      {{ score }}/100
-                    </div>
-                  </div>
-                </div>
-
-                <div class="mb-6">
-                  <label
-                    for="comments"
-                    class="block text-lg font-medium text-gray-700 mb-2"
-                    >Comments:</label
-                  >
-                  <textarea
-                    id="comments"
-                    v-model="comments"
-                    :disabled="isSubmitting"
-                    placeholder="Optional comments about the candidate's performance"
-                    rows="4"
-                    class="border border-gray-300 rounded-lg px-4 py-3 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all duration-300"
-                  ></textarea>
-                </div>
-
-                <button
-                  @click="submitScore"
-                  :disabled="isSubmitting"
-                  class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition-colors duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          <!-- No Assigned Category or Candidate -->
+          <template v-else-if="!current_category || !next_candidate">
+            <div class="text-center py-12">
+              <div class="mb-4">
+                <div
+                  class="mx-auto w-16 h-16 rounded-full flex items-center justify-center"
+                  :class="isDarkMode ? 'bg-blue-800' : 'bg-blue-100'"
                 >
-                  <span v-if="isSubmitting" class="mr-2">
-                    <svg
-                      class="animate-spin h-5 w-5 text-white"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        class="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        stroke-width="4"
-                      ></circle>
-                      <path
-                        class="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                  </span>
-                  Submit Score
-                </button>
+                  <i class="fas fa-hourglass-half text-3xl text-blue-600"></i>
+                </div>
+              </div>
+              <p
+                class="text-xl font-semibold mb-2 transition-colors"
+                :class="isDarkMode ? 'text-white' : 'text-gray-700'"
+              >
+                {{
+                  current_category && !next_candidate
+                    ? "All candidates in this category have been scored."
+                    : "No active category or candidate assigned for scoring."
+                }}
+              </p>
+              <p
+                class="transition-colors"
+                :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+              >
+                Please await further instructions.
+              </p>
+            </div>
+          </template>
+
+          <!-- Score Already Confirmed OR Waiting for Next Candidate -->
+          <template v-else-if="isWaitingForNextCandidate || hasConfirmedScore">
+            <div class="text-center py-12">
+              <div class="mb-4">
+                <div
+                  class="mx-auto w-16 h-16 rounded-full flex items-center justify-center"
+                  :class="isDarkMode ? 'bg-green-800' : 'bg-green-100'"
+                >
+                  <i class="fas fa-check-circle text-3xl text-green-600"></i>
+                </div>
+              </div>
+              <p
+                class="text-xl font-semibold mb-2 transition-colors"
+                :class="isDarkMode ? 'text-white' : 'text-gray-700'"
+              >
+                {{
+                  hasConfirmedScore
+                    ? "Your score has been submitted and confirmed."
+                    : "All candidates in this category have been scored."
+                }}
+              </p>
+              <p
+                class="transition-colors"
+                :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+              >
+                Please await the announcement of the next candidate or final
+                results.
+              </p>
+            </div>
+          </template>
+
+          <!-- Active Candidate Display -->
+          <template v-else>
+            <div class="transition-all duration-500 ease-in-out">
+              <div class="flex flex-col lg:flex-row items-start gap-8">
+                <!-- Enhanced Candidate Info -->
+                <CurrentCandidateCard
+                  :candidate="next_candidate"
+                  :isDarkMode="isDarkMode"
+                  :getCandidatePhotoUrl="getCandidatePhotoUrl"
+                  :handleImageError="handleImageError"
+                />
+
+                <!-- Enhanced Scoring Form -->
+                <div class="lg:w-2/3 w-full">
+                  <!-- Temporary Score Display -->
+                  <template v-if="temporaryScore">
+                    <TemporaryScoreCard
+                      v-if="temporaryScore"
+                      :score="temporaryScore.score"
+                      :comments="temporaryScore.comments"
+                      :isDarkMode="isDarkMode"
+                      :isSubmitting="isSubmitting"
+                      :maxScore="maxScore"
+                      @confirmScore="confirmScore"
+                    />
+                  </template>
+                  <!-- Enhanced Score Input Form -->
+                  <template v-else>
+                    <ScoreInputForm
+                      :score="score"
+                      :comments="comments"
+                      :isDarkMode="isDarkMode"
+                      :isSubmitting="isSubmitting"
+                      :maxScore="maxScore"
+                      :handleScoreInput="handleScoreInput"
+                      :restrictScoreKeydown="restrictScoreKeydown"
+                      :submitScore="submitScore"
+                      @update:comments="(val) => (comments = val)"
+                    />
+                  </template>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Confirmation Modal -->
-    <div
-      v-if="showConfirmModal"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 transition-opacity duration-300"
-    >
-      <div
-        class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 transform transition-all duration-300 ease-out"
-        :class="
-          showConfirmModal ? 'scale-100 opacity-100' : 'scale-95 opacity-0'
-        "
-      >
-        <h3 class="text-xl font-bold text-gray-800 mb-4">Confirm Score</h3>
-        <p class="text-gray-700 mb-6">
-          Are you sure you want to confirm a score of
-          <span class="font-bold text-blue-600">{{ score }}</span>
-          {{
-            comments ? "with the following comments:" : "without any comments?"
-          }}
-        </p>
-
-        <div
-          v-if="comments"
-          class="bg-gray-50 p-3 rounded mb-6 text-gray-700 italic"
-        >
-          "{{ comments }}"
-        </div>
-
-        <div class="flex justify-end space-x-3">
-          <button
-            @click="confirmScoreSubmission(false)"
-            class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100 transition-colors duration-300"
-          >
-            Cancel
-          </button>
-          <button
-            @click="confirmScoreSubmission(true)"
-            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-300"
-          >
-            Confirm
-          </button>
+          </template>
         </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.dark-mode-toggle {
+  position: relative;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.dark-mode-toggle:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+.toggle-container {
+  position: relative;
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.sun-icon,
+.moon-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: all 0.3s ease;
+  color: #fbbf24;
+}
+
+.moon-icon {
+  color: #60a5fa;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(180deg);
+}
+
+.moon-visible {
+  opacity: 1;
+  transform: translate(-50%, -50%) rotate(0deg);
+}
+
+.sun-hidden {
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(-180deg);
+}
+
+.dark-mode-active {
+  background-color: rgba(59, 130, 246, 0.2);
+}
+</style>

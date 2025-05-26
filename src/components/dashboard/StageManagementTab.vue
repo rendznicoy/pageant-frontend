@@ -14,6 +14,66 @@ import axiosClient from "@/axios";
 import Pusher from "pusher-js";
 import { useRouter } from "vue-router";
 
+const enhancedScoringTooltipContent = `
+Enhanced Scoring Process:
+- Mean Rating: Average of all judges' scores
+- Mean Rank: Average of individual judge rankings
+- Overall Rank: Based primarily on Mean Rating; Mean Rank used as tiebreaker
+Example:
+Judge A: 90 (Rank 1), Judge B: 88 (Rank 2)
+Mean Rating = (90 + 88) ÷ 2 = 89
+Mean Rank = (1 + 2) ÷ 2 = 1.5
+Lower Mean Rank is better for tiebreaking
+`;
+
+const getScoreColorClass = (score) => {
+  const maxScore = eventMaxScore.value;
+  const percentage = (score / maxScore) * 100;
+
+  if (percentage < 60) return "bg-red-100 text-red-800";
+  if (percentage >= 60 && percentage < 80)
+    return "bg-yellow-100 text-yellow-800";
+  return "bg-green-100 text-green-800";
+};
+
+const hasActiveStage = computed(() => {
+  return stages.value.some((stage) => stage.status === "active");
+});
+
+const hasActiveCategory = computed(() => {
+  return stages.value.some((stage) =>
+    stage.categories.some((category) => category.status === "active")
+  );
+});
+
+const getStatusIcon = (status) => {
+  switch (status) {
+    case "pending":
+      return "fas fa-clock text-yellow-500";
+    case "active":
+      return "fas fa-play-circle text-green-500";
+    case "finalized":
+      return "fas fa-check-circle text-blue-500";
+    default:
+      return "fas fa-question-circle text-gray-500";
+  }
+};
+
+const eventDivision = ref("standard");
+
+const lastStage = computed(() => {
+  if (!stages.value.length) return null;
+  return stages.value[stages.value.length - 1];
+});
+
+const isSingleStage = computed(() => {
+  return stages.value.length === 1;
+});
+
+const isStandardDivision = computed(() => {
+  return eventDivision.value === "standard";
+});
+
 const selectStage = (stage) => {
   selectedStage.value = stage;
   showTopCandidatesModal.value = true;
@@ -41,6 +101,7 @@ const showConfirmSelectModal = ref(false);
 const showConfirmResetModal = ref(false);
 const pendingScoresMap = ref({});
 const hasSelectedTopCandidates = ref({});
+const eventMaxScore = ref(100);
 
 let pusher = null;
 let channel = null;
@@ -65,6 +126,13 @@ const fetchStages = async () => {
   loading.value = true;
   try {
     console.log("Fetching stages for eventId:", props.eventId);
+
+    // Fetch event details to get division
+    const eventResponse = await axiosClient.get(
+      `/api/v1/events/${props.eventId}`
+    );
+    eventDivision.value = eventResponse.division || "standard";
+    eventMaxScore.value = eventResponse.max_score || 100;
 
     // Fetch stages
     const stagesResponse = await axiosClient.get(
@@ -106,28 +174,21 @@ const fetchStages = async () => {
     // Initialize hasSelectedTopCandidates
     stages.value.forEach((stage) => {
       hasSelectedTopCandidates.value[stage.id] = !!stage.top_candidates_count;
-      console.log(
-        `Stage ${stage.id} hasSelectedTopCandidates:`,
-        hasSelectedTopCandidates.value[stage.id]
-      );
     });
 
-    // Set initial current candidate
-    const activeCategories = stages.value
-      .flatMap((stage) => stage.categories ?? [])
-      .filter((cat) => cat.status === "active");
-
+    // Auto-refresh partial results for active/finalized stages
+    const activeOrFinalizedStage = stages.value.find(
+      (s) => s.status === "active" || s.status === "finalized"
+    );
     if (
-      activeCategories.length > 0 &&
-      activeCategories[0].current_candidate_id
+      activeOrFinalizedStage &&
+      (!selectedStage.value ||
+        selectedStage.value.id === activeOrFinalizedStage.id)
     ) {
-      currentCandidateId.value = activeCategories[0].current_candidate_id;
+      selectedStage.value = activeOrFinalizedStage;
+      await fetchPartialResults(activeOrFinalizedStage.id);
     }
 
-    console.log(
-      "→ Set pendingScoresMap during fetchStages:",
-      pendingScoresMap.value
-    );
     console.log("Stages fetched:", stages.value);
   } catch (error) {
     handleError(error, "Failed to load stages.");
@@ -401,36 +462,32 @@ const selectTopCandidates = async () => {
 };
 
 const confirmSelectTopCandidates = async () => {
-  const males = partialResults.value.filter(
-    (c) => c.sex?.toLowerCase() === "m" || c.sex?.toLowerCase() === "M"
-  );
-  const females = partialResults.value.filter(
-    (c) => c.sex?.toLowerCase() === "f" || c.sex?.toLowerCase() === "F"
-  );
-
-  console.log(
-    "Filtered MALES:",
-    males.length,
-    males.map((c) => c.candidate?.first_name)
-  );
-  console.log(
-    "Filtered FEMALES:",
-    females.length,
-    females.map((c) => c.candidate?.first_name)
-  );
-
-  console.log(
-    "RAW partialResults response:",
-    JSON.stringify(partialResults.value, null, 2)
-  );
-
-  const requiredPerSex = topCandidatesCount.value / 2;
-
-  if (males.length < requiredPerSex || females.length < requiredPerSex) {
-    toast.error(
-      `Not enough candidates. You need at least ${requiredPerSex} males and ${requiredPerSex} females with confirmed scores.`
+  if (isStandardDivision.value) {
+    // Standard division requires even numbers and equal male/female split
+    const males = partialResults.value.filter(
+      (c) => c.sex?.toLowerCase() === "m" || c.sex?.toLowerCase() === "male"
     );
-    return;
+    const females = partialResults.value.filter(
+      (c) => c.sex?.toLowerCase() === "f" || c.sex?.toLowerCase() === "female"
+    );
+
+    const requiredPerSex = topCandidatesCount.value / 2;
+
+    if (males.length < requiredPerSex || females.length < requiredPerSex) {
+      toast.error(
+        `Not enough candidates. You need at least ${requiredPerSex} males and ${requiredPerSex} females with confirmed scores.`
+      );
+      return;
+    }
+  } else {
+    // Male-only or female-only division
+    const availableCandidates = partialResults.value.length;
+    if (availableCandidates < topCandidatesCount.value) {
+      toast.error(
+        `Not enough candidates. Only ${availableCandidates} candidates available with confirmed scores.`
+      );
+      return;
+    }
   }
 
   loading.value = true;
@@ -495,7 +552,7 @@ const setupWebSocket = () => {
     });
 
     channel = pusher.subscribe(`event.${props.eventId}`);
-    const debouncedFetchStages = debounce(fetchStages, 10000);
+    const debouncedFetchStages = debounce(fetchStages, 60000);
 
     channel.bind("App\\Events\\StageStatusUpdated", (e) => {
       console.log(`Stage ${e.stage_id} status updated to ${e.status}`);
@@ -631,6 +688,10 @@ const getAvailableCandidates = (categoryId) => {
       return true;
     }
 
+    // Check if this candidate has been fully scored in this category
+    // (This would require an API call to check if all judges have confirmed scores)
+    // For now, we'll use a simplified check
+
     // Check if this candidate is currently being used in any OTHER active category
     const isCurrentlyUsedElsewhere = stages.value
       .flatMap((stage) => stage.categories)
@@ -732,6 +793,7 @@ watchEffect(async () => {
 });
 </script>
 
+<
 <template>
   <div class="flex flex-col md:flex-row gap-6">
     <!-- Stage Management Section -->
@@ -752,13 +814,17 @@ watchEffect(async () => {
               <h3 class="text-lg font-medium text-gray-900">
                 {{ stage.name }}
               </h3>
-              <p class="text-sm text-gray-500">
-                Status: {{ stage.status || "pending" }}
+              <p class="text-sm text-gray-500 flex items-center">
+                Status:
+                <i
+                  :class="getStatusIcon(stage.status || 'pending')"
+                  class="ml-2"
+                ></i>
               </p>
             </div>
             <div class="space-x-2">
               <button
-                v-if="stage.status === 'pending'"
+                v-if="stage.status === 'pending' && !hasActiveStage"
                 @click="startStage(stage.id)"
                 class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
                 :disabled="loading"
@@ -785,7 +851,7 @@ watchEffect(async () => {
                 v-if="stage.status === 'finalized'"
                 @click="
                   () => {
-                    if (lastStage?.id === stage.id) {
+                    if (isSingleStage || lastStage?.id === stage.id) {
                       viewFinalResults(stage.id);
                     } else {
                       selectStage(stage);
@@ -796,11 +862,11 @@ watchEffect(async () => {
                 :disabled="loading"
               >
                 {{
-                  lastStage?.id === stage.id
+                  isSingleStage || lastStage?.id === stage.id
                     ? "View Final Results"
                     : hasSelectedTopCandidates[stage.id]
-                    ? "View Partial Results / Reset Selection"
-                    : "View Partial Results / Select Top Candidates"
+                    ? "Select Top Candidates / Reset Selection"
+                    : "Select Top Candidates"
                 }}
               </button>
             </div>
@@ -817,8 +883,12 @@ watchEffect(async () => {
                   <p class="text-sm font-medium text-gray-900">
                     {{ category.name }}
                   </p>
-                  <p class="text-sm text-gray-500">
-                    Status: {{ category.status || "pending" }}
+                  <p class="text-sm text-gray-500 flex items-center">
+                    Status:
+                    <i
+                      :class="getStatusIcon(category.status || 'pending')"
+                      class="ml-2"
+                    ></i>
                   </p>
                   <p
                     v-if="
@@ -843,16 +913,18 @@ watchEffect(async () => {
                 <div class="space-x-2">
                   <button
                     v-if="
-                      category.status === 'pending' && stage.status === 'active'
+                      category.status === 'pending' &&
+                      stage.status === 'active' &&
+                      !hasActiveCategory
                     "
                     @click="startCategory(category.id)"
                     class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                    :disabled="loading || hasActiveCategoryInStage(stage)"
+                    :disabled="loading"
                   >
                     Start Category
                   </button>
                   <button
-                    v-if="['active', 'finalized'].includes(category.status)"
+                    v-if="category.status === 'active'"
                     @click="resetCategory(category.id)"
                     class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
                     :disabled="loading"
@@ -945,7 +1017,7 @@ watchEffect(async () => {
                     </div>
                   </template>
 
-                  <!-- only show that hint if category is still pending or stage isn’t active -->
+                  <!-- only show that hint if category is still pending or stage isn't active -->
                   <template
                     v-else-if="
                       stage.status !== 'active' || category.status === 'pending'
@@ -956,7 +1028,7 @@ watchEffect(async () => {
                       are active.
                     </p>
                   </template>
-                  <!-- if category.status==='finalized', nothing gets shown here (you’ll have your Reset button above) -->
+                  <!-- if category.status==='finalized', nothing gets shown here (you'll have your Reset button above) -->
                 </div>
               </div>
             </div>
@@ -971,193 +1043,624 @@ watchEffect(async () => {
       </div>
     </div>
 
-    <!-- Partial Results Section -->
-    <div class="md:w-1/2 bg-white rounded-lg shadow p-6">
+    <!-- Enhanced Partial Results Section -->
+    <div class="md:w-1/2 bg-white rounded-lg shadow-lg p-6">
       <h3 class="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+        <i class="fas fa-chart-line text-green-600 mr-2"></i>
         Partial Results
         <span
-          class="ml-2 text-sm text-gray-500 cursor-help"
+          class="ml-2 text-sm cursor-help"
           v-tooltip="{
-            content:
-              'The Raw Average is calculated by summing the weighted scores (score × category weight / 100) for each judge and averaging across all judges. Scores range from 0 to 100.',
+            content: enhancedScoringTooltipContent,
+            allowHTML: true,
             triggers: ['hover', 'click'],
           }"
         >
-          (?)
+          <i class="fas fa-info-circle text-gray-400"></i>
         </span>
       </h3>
-      <div v-if="partialResults.length === 0" class="text-gray-500">
-        No partial results available yet.
-      </div>
-      <div v-else>
-        <!-- Male Candidates Table -->
-        <h4 class="text-md font-medium text-gray-800 mb-2">Male Candidates</h4>
-        <table class="min-w-full divide-y divide-gray-200 mb-6">
-          <thead class="bg-gray-50">
-            <tr>
-              <th
-                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Rank
-              </th>
-              <th
-                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Candidate
-              </th>
-              <th
-                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Raw Average
-              </th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
-            <tr v-for="result in maleResults" :key="result.candidate_id">
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ result.rank }}
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ result.candidate?.first_name }}
-                {{ result.candidate?.last_name }} (#{{
-                  result.candidate?.candidate_number
-                }})
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ Number(result.raw_average).toFixed(2) }}/100
-              </td>
-            </tr>
-            <tr v-if="!maleResults.length">
-              <td colspan="3" class="px-6 py-4 text-sm text-gray-500">
-                No male candidates scored yet.
-              </td>
-            </tr>
-          </tbody>
-        </table>
 
-        <!-- Female Candidates Table -->
-        <h4 class="text-md font-medium text-gray-800 mb-2">
-          Female Candidates
-        </h4>
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th
-                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Rank
-              </th>
-              <th
-                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Candidate
-              </th>
-              <th
-                class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-              >
-                Raw Average
-              </th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
-            <tr v-for="result in femaleResults" :key="result.candidate_id">
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ result.rank }}
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ result.candidate.first_name }}
-                {{ result.candidate.last_name }} (#{{
-                  result.candidate.candidate_number
-                }})
-              </td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                {{ Number(result.raw_average).toFixed(2) }}/100
-              </td>
-            </tr>
-            <tr v-if="!femaleResults.length">
-              <td colspan="3" class="px-6 py-4 text-sm text-gray-500">
-                No female candidates scored yet.
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <div
+        v-if="partialResults.length === 0"
+        class="text-center py-8 text-gray-500"
+      >
+        <i class="fas fa-chart-bar text-gray-300 text-3xl mb-2"></i>
+        <p>No partial results available yet.</p>
+      </div>
+
+      <div v-else>
+        <!-- Standard Division: Separate Male/Female Tables -->
+        <template v-if="isStandardDivision">
+          <!-- Male Candidates Table -->
+          <div class="mb-6">
+            <h4
+              class="text-md font-medium text-blue-800 mb-3 flex items-center"
+            >
+              <i class="fas fa-male mr-2"></i>
+              Male Candidates
+            </h4>
+            <div class="overflow-x-auto bg-blue-50 rounded-lg">
+              <table class="min-w-full divide-y divide-blue-200">
+                <thead class="bg-blue-100">
+                  <tr>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Rank
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Candidate
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Mean Rating
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Mean Rank
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <tr
+                    v-for="result in maleResults"
+                    :key="result.candidate_id"
+                    class="hover:bg-blue-50 transition-colors"
+                  >
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <div class="flex items-center">
+                        <span class="text-lg font-bold text-gray-900">{{
+                          result.overall_rank || result.rank
+                        }}</span>
+                        <i
+                          v-if="(result.overall_rank || result.rank) === 1"
+                          class="fas fa-crown text-yellow-500 ml-2"
+                        ></i>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <div>
+                        <div class="text-sm font-medium text-gray-900">
+                          {{ result.candidate?.first_name }}
+                          {{ result.candidate?.last_name }}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          #{{ result.candidate?.candidate_number }} -
+                          {{ result.candidate?.team }}
+                        </div>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span
+                        class="px-2 py-1 rounded-full text-xs font-medium"
+                        :class="
+                          getScoreColorClass(
+                            result.mean_rating || result.raw_average
+                          )
+                        "
+                      >
+                        {{
+                          Number(
+                            result.mean_rating || result.raw_average
+                          ).toFixed(1)
+                        }}/{{ eventMaxScore }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span class="text-xs text-gray-600">
+                        {{
+                          result.mean_rank
+                            ? Number(result.mean_rank).toFixed(2)
+                            : "N/A"
+                        }}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr v-if="!maleResults.length">
+                    <td
+                      colspan="4"
+                      class="px-4 py-6 text-center text-gray-500 text-sm"
+                    >
+                      No male candidates scored yet.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Female Candidates Table -->
+          <div>
+            <h4
+              class="text-md font-medium text-pink-800 mb-3 flex items-center"
+            >
+              <i class="fas fa-female mr-2"></i>
+              Female Candidates
+            </h4>
+            <div class="overflow-x-auto bg-pink-50 rounded-lg">
+              <table class="min-w-full divide-y divide-pink-200">
+                <thead class="bg-pink-100">
+                  <tr>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Rank
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Candidate
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Mean Rating
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Mean Rank
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <tr
+                    v-for="result in femaleResults"
+                    :key="result.candidate_id"
+                    class="hover:bg-pink-50 transition-colors"
+                  >
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <div class="flex items-center">
+                        <span class="text-lg font-bold text-gray-900">{{
+                          result.overall_rank || result.rank
+                        }}</span>
+                        <i
+                          v-if="(result.overall_rank || result.rank) === 1"
+                          class="fas fa-crown text-yellow-500 ml-2"
+                        ></i>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <div>
+                        <div class="text-sm font-medium text-gray-900">
+                          {{ result.candidate.first_name }}
+                          {{ result.candidate.last_name }}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          #{{ result.candidate.candidate_number }} -
+                          {{ result.candidate.team }}
+                        </div>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span
+                        class="px-2 py-1 rounded-full text-xs font-medium"
+                        :class="
+                          getScoreColorClass(
+                            result.mean_rating || result.raw_average
+                          )
+                        "
+                      >
+                        {{
+                          Number(
+                            result.mean_rating || result.raw_average
+                          ).toFixed(1)
+                        }}/{{ eventMaxScore }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span class="text-xs text-gray-600">
+                        {{
+                          result.mean_rank
+                            ? Number(result.mean_rank).toFixed(2)
+                            : "N/A"
+                        }}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr v-if="!femaleResults.length">
+                    <td
+                      colspan="4"
+                      class="px-4 py-6 text-center text-gray-500 text-sm"
+                    >
+                      No female candidates scored yet.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+
+        <!-- Single Division Table -->
+        <template v-else>
+          <h4 class="text-md font-medium text-gray-800 mb-3">
+            {{ eventDivision === "male-only" ? "Male" : "Female" }} Candidates
+          </h4>
+          <div class="overflow-x-auto bg-gray-50 rounded-lg">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-100">
+                <tr>
+                  <th
+                    class="px-4 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider"
+                  >
+                    Rank
+                  </th>
+                  <th
+                    class="px-4 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider"
+                  >
+                    Candidate
+                  </th>
+                  <th
+                    class="px-4 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider"
+                  >
+                    Mean Rating
+                  </th>
+                  <th
+                    class="px-4 py-3 text-left text-xs font-medium text-gray-800 uppercase tracking-wider"
+                  >
+                    Mean Rank
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                <tr
+                  v-for="result in partialResults"
+                  :key="result.candidate_id"
+                  class="hover:bg-gray-50 transition-colors"
+                >
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <span class="text-lg font-bold text-gray-900">{{
+                      result.overall_rank || result.rank
+                    }}</span>
+                  </td>
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <div>
+                      <div class="text-sm font-medium text-gray-900">
+                        {{ result.candidate?.first_name }}
+                        {{ result.candidate?.last_name }}
+                      </div>
+                      <div class="text-xs text-gray-500">
+                        #{{ result.candidate?.candidate_number }} -
+                        {{ result.candidate?.team }}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <span
+                      class="px-2 py-1 rounded-full text-xs font-medium"
+                      :class="
+                        getScoreColorClass(
+                          result.mean_rating || result.raw_average
+                        )
+                      "
+                    >
+                      {{
+                        Number(
+                          result.mean_rating || result.raw_average
+                        ).toFixed(1)
+                      }}/{{ eventMaxScore }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 whitespace-nowrap">
+                    <span class="text-xs text-gray-600">
+                      {{
+                        result.mean_rank
+                          ? Number(result.mean_rank).toFixed(2)
+                          : "N/A"
+                      }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </div>
     </div>
 
-    <!-- Top Candidates Modal -->
+    <!-- Enhanced Top Candidates Modal -->
     <div
       v-if="showTopCandidatesModal"
-      class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+      class="fixed inset-0 bg-gray-600 bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
     >
-      <div class="bg-white rounded-lg p-6 w-full max-w-md">
-        <h3 class="text-lg font-semibold mb-4">
-          Select Top Candidates for {{ selectedStage?.name }}
-        </h3>
-        <div v-if="partialResults.length" class="mb-4">
-          <h4 class="text-md font-medium mb-2 flex items-center">
-            Partial Results
+      <div
+        class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+      >
+        <div class="p-6 border-b border-gray-200">
+          <h3 class="text-xl font-bold text-gray-800 flex items-center">
+            <i class="fas fa-trophy text-yellow-500 mr-2"></i>
+            Select Top Candidates for {{ selectedStage?.name }}
             <span
-              class="ml-2 text-sm text-gray-500 cursor-help"
+              class="ml-2 text-sm cursor-help"
               v-tooltip="{
-                content:
-                  'The Raw Average is calculated by summing the weighted scores (score × category weight / 100) for each judge and averaging across all judges. Scores range from 0 to 100.',
+                content: enhancedScoringTooltipContent,
+                allowHTML: true,
                 triggers: ['hover', 'click'],
               }"
             >
-              (?)
+              <i class="fas fa-info-circle text-gray-400"></i>
             </span>
-          </h4>
-          <ul>
-            <li
-              v-for="result in partialResults"
-              :key="result.candidate_id"
-              class="text-sm"
-            >
-              {{ result.candidate.first_name }}
-              {{ result.candidate.last_name }} (#{{
-                result.candidate.candidate_number
-              }}) - Rank {{ result.rank }}:
-              {{ Number(result.raw_average).toFixed(2) }}/100
-            </li>
-          </ul>
+          </h3>
+          <p class="text-gray-600 mt-1">
+            Review current standings and select advancing candidates
+          </p>
         </div>
-        <div class="mb-4">
-          <div v-if="!hasSelectedTopCandidates[selectedStage?.id]">
-            <label class="block text-sm font-medium text-gray-700">
-              Number of Top Candidates (must be even)
-            </label>
-            <input
-              type="number"
-              v-model="topCandidatesCount"
-              min="2"
-              step="2"
-              class="mt-1 block w-full border-gray-300 rounded-md shadow-sm"
-            />
+
+        <div class="p-6">
+          <!-- Partial Results Display -->
+          <div v-if="partialResults.length" class="mb-6">
+            <h4 class="text-lg font-semibold mb-4 text-gray-800">
+              Current Standings
+            </h4>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              <!-- Male Results Table -->
+              <div class="bg-blue-50 rounded-lg p-4">
+                <h5 class="font-medium text-blue-800 mb-3 flex items-center">
+                  <i class="fas fa-male mr-2"></i>
+                  Male Candidates ({{ maleResults.length }})
+                </h5>
+                <div class="overflow-x-auto">
+                  <table class="min-w-full divide-y divide-blue-200">
+                    <thead class="bg-blue-100">
+                      <tr>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-blue-800 uppercase"
+                        >
+                          Rank
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-blue-800 uppercase"
+                        >
+                          Candidate
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-blue-800 uppercase"
+                        >
+                          Rating
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                      <tr
+                        v-for="result in maleResults"
+                        :key="result.candidate_id"
+                        class="hover:bg-blue-50"
+                      >
+                        <td class="px-3 py-2 text-sm font-bold">
+                          {{ result.overall_rank || result.rank }}
+                        </td>
+                        <td class="px-3 py-2 text-sm">
+                          <div class="font-medium">
+                            {{ result.candidate.first_name }}
+                            {{ result.candidate.last_name }}
+                          </div>
+                          <div class="text-xs text-gray-500">
+                            #{{ result.candidate.candidate_number }}
+                          </div>
+                        </td>
+                        <td class="px-3 py-2">
+                          <span
+                            class="px-2 py-1 rounded-full text-xs font-medium"
+                            :class="
+                              getScoreColorClass(
+                                result.mean_rating || result.raw_average
+                              )
+                            "
+                          >
+                            {{
+                              Number(
+                                result.mean_rating || result.raw_average
+                              ).toFixed(1)
+                            }}
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Female Results Table -->
+              <div class="bg-pink-50 rounded-lg p-4">
+                <h5 class="font-medium text-pink-800 mb-3 flex items-center">
+                  <i class="fas fa-female mr-2"></i>
+                  Female Candidates ({{ femaleResults.length }})
+                </h5>
+                <div class="overflow-x-auto">
+                  <table class="min-w-full divide-y divide-pink-200">
+                    <thead class="bg-pink-100">
+                      <tr>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-pink-800 uppercase"
+                        >
+                          Rank
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-pink-800 uppercase"
+                        >
+                          Candidate
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-pink-800 uppercase"
+                        >
+                          Rating
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                      <tr
+                        v-for="result in femaleResults"
+                        :key="result.candidate_id"
+                        class="hover:bg-pink-50"
+                      >
+                        <td class="px-3 py-2 text-sm font-bold">
+                          {{ result.overall_rank || result.rank }}
+                        </td>
+                        <td class="px-3 py-2 text-sm">
+                          <div class="font-medium">
+                            {{ result.candidate.first_name }}
+                            {{ result.candidate.last_name }}
+                          </div>
+                          <div class="text-xs text-gray-500">
+                            #{{ result.candidate.candidate_number }}
+                          </div>
+                        </td>
+                        <td class="px-3 py-2">
+                          <span
+                            class="px-2 py-1 rounded-full text-xs font-medium"
+                            :class="
+                              getScoreColorClass(
+                                result.mean_rating || result.raw_average
+                              )
+                            "
+                          >
+                            {{
+                              Number(
+                                result.mean_rating || result.raw_average
+                              ).toFixed(1)
+                            }}
+                          </span>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           </div>
-          <div v-else>
-            <button
-              @click="resetTopCandidates"
-              class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-              :disabled="loading"
-            >
-              Reset Selection
-            </button>
+
+          <!-- Selection Controls -->
+          <div class="bg-gray-50 rounded-lg p-4">
+            <div v-if="!hasSelectedTopCandidates[selectedStage?.id]">
+              <label class="block text-sm font-medium text-gray-700 mb-2">
+                Number of Top Candidates to Advance
+                <span v-if="isStandardDivision" class="text-gray-500"
+                  >(must be even for equal male/female split)</span
+                >
+              </label>
+              <div class="flex items-center space-x-4">
+                <input
+                  type="number"
+                  v-model="topCandidatesCount"
+                  :min="isStandardDivision ? 2 : 1"
+                  :step="isStandardDivision ? 2 : 1"
+                  :max="Math.min(maleResults.length, femaleResults.length) * 2"
+                  class="w-24 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                  placeholder="6"
+                />
+                <div
+                  v-if="isStandardDivision && topCandidatesCount"
+                  class="text-sm text-gray-600 bg-white px-3 py-2 rounded border"
+                >
+                  <i class="fas fa-info-circle text-blue-500 mr-1"></i>
+                  Will advance:
+                  <strong>{{ topCandidatesCount / 2 }}</strong> males +
+                  <strong>{{ topCandidatesCount / 2 }}</strong> females
+                </div>
+                <div
+                  v-else-if="topCandidatesCount"
+                  class="text-sm text-gray-600 bg-white px-3 py-2 rounded border"
+                >
+                  <i class="fas fa-info-circle text-blue-500 mr-1"></i>
+                  Will advance: <strong>{{ topCandidatesCount }}</strong>
+                  {{ eventDivision === "male-only" ? "male" : "female" }}
+                  candidates
+                </div>
+              </div>
+            </div>
+            <div v-else class="text-center py-4">
+              <div
+                class="bg-green-100 text-green-800 px-4 py-2 rounded-lg inline-flex items-center"
+              >
+                <i class="fas fa-check-circle mr-2"></i>
+                Top candidates already selected
+              </div>
+              <button
+                @click="resetTopCandidates"
+                class="ml-4 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition"
+                :disabled="loading"
+              >
+                <i class="fas fa-undo mr-1"></i>
+                Reset Selection
+              </button>
+            </div>
           </div>
         </div>
-        <div class="flex justify-end space-x-2">
+
+        <div
+          class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3"
+        >
           <button
             @click="showTopCandidatesModal = false"
-            class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
           >
+            <i class="fas fa-times mr-1"></i>
             Cancel
           </button>
           <button
             v-if="!hasSelectedTopCandidates[selectedStage?.id]"
             @click="selectTopCandidates"
-            class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+            class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition disabled:opacity-50"
+            :disabled="loading || !topCandidatesCount"
+          >
+            <i v-if="loading" class="fas fa-spinner fa-spin mr-2"></i>
+            <i v-else class="fas fa-check mr-2"></i>
+            {{ loading ? "Processing..." : "Confirm Selection" }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Reset Top Candidates Confirmation Modal -->
+    <div
+      v-if="showConfirmResetModal"
+      class="fixed inset-0 bg-gray-600 bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
+    >
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div class="p-6 border-b border-gray-200">
+          <h3 class="text-lg font-semibold text-gray-800 flex items-center">
+            <i class="fas fa-exclamation-triangle text-yellow-500 mr-2"></i>
+            Reset Top Candidates Selection
+          </h3>
+        </div>
+
+        <div class="p-6">
+          <p class="text-gray-600 mb-4">
+            Are you sure you want to reset the top candidates selection for
+            <strong>{{ selectedStage?.name }}</strong
+            >?
+          </p>
+          <p class="text-sm text-red-600 bg-red-50 p-3 rounded">
+            <i class="fas fa-warning mr-1"></i>
+            This will reactivate all candidates and clear the current selection.
+            This action cannot be undone.
+          </p>
+        </div>
+
+        <div
+          class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3"
+        >
+          <button
+            @click="showConfirmResetModal = false"
+            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
             :disabled="loading"
           >
-            {{ loading ? "Saving..." : "Save" }}
+            <i class="fas fa-times mr-1"></i>
+            Cancel
+          </button>
+          <button
+            @click="confirmResetTopCandidates"
+            class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition"
+            :disabled="loading"
+          >
+            <i v-if="loading" class="fas fa-spinner fa-spin mr-2"></i>
+            <i v-else class="fas fa-check mr-2"></i>
+            {{ loading ? "Resetting..." : "Confirm Reset" }}
           </button>
         </div>
       </div>
@@ -1166,58 +1669,58 @@ watchEffect(async () => {
     <!-- Confirm Select Top Candidates Modal -->
     <div
       v-if="showConfirmSelectModal"
-      class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
+      class="fixed inset-0 bg-gray-600 bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
     >
-      <div class="bg-white rounded-lg p-6 w-full max-w-md">
-        <h3 class="text-lg font-semibold mb-4">Confirm Selection</h3>
-        <p class="text-sm text-gray-600 mb-4">
-          Are you sure you want to select {{ topCandidatesCount }} top
-          candidates ({{ topCandidatesCount / 2 }} males and
-          {{ topCandidatesCount / 2 }} females) for {{ selectedStage?.name }}?
-        </p>
-        <div class="flex justify-end space-x-2">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div class="p-6 border-b border-gray-200">
+          <h3 class="text-lg font-semibold text-gray-800 flex items-center">
+            <i class="fas fa-trophy text-yellow-500 mr-2"></i>
+            Confirm Top Candidates Selection
+          </h3>
+        </div>
+
+        <div class="p-6">
+          <p class="text-gray-600 mb-4">
+            Are you sure you want to select the top
+            <strong>{{ topCandidatesCount }}</strong> candidates for
+            <strong>{{ selectedStage?.name }}</strong
+            >?
+          </p>
+          <div
+            v-if="isStandardDivision"
+            class="text-sm text-blue-600 bg-blue-50 p-3 rounded"
+          >
+            <i class="fas fa-info-circle mr-1"></i>
+            This will advance {{ topCandidatesCount / 2 }} male and
+            {{ topCandidatesCount / 2 }} female candidates to the next stage.
+          </div>
+          <div v-else class="text-sm text-blue-600 bg-blue-50 p-3 rounded">
+            <i class="fas fa-info-circle mr-1"></i>
+            This will advance {{ topCandidatesCount }}
+            {{ eventDivision === "male-only" ? "male" : "female" }} candidates
+            to the next stage.
+          </div>
+        </div>
+
+        <div
+          class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3"
+        >
           <button
             @click="showConfirmSelectModal = false"
-            class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+            :disabled="loading"
           >
+            <i class="fas fa-times mr-1"></i>
             Cancel
           </button>
           <button
             @click="confirmSelectTopCandidates"
-            class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition"
             :disabled="loading"
           >
-            {{ loading ? "Confirming..." : "Confirm" }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Confirm Reset Top Candidates Modal -->
-    <div
-      v-if="showConfirmResetModal"
-      class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50"
-    >
-      <div class="bg-white rounded-lg p-6 w-full max-w-md">
-        <h3 class="text-lg font-semibold mb-4">Confirm Reset</h3>
-        <p class="text-sm text-gray-600 mb-4">
-          Are you sure you want to reset the top candidates selection for
-          {{ selectedStage?.name }}? This will reactivate all candidates for
-          this event.
-        </p>
-        <div class="flex justify-end space-x-2">
-          <button
-            @click="showConfirmResetModal = false"
-            class="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
-          >
-            Cancel
-          </button>
-          <button
-            @click="confirmResetTopCandidates"
-            class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-            :disabled="loading"
-          >
-            {{ loading ? "Resetting..." : "Reset" }}
+            <i v-if="loading" class="fas fa-spinner fa-spin mr-2"></i>
+            <i v-else class="fas fa-check mr-2"></i>
+            {{ loading ? "Selecting..." : "Confirm Selection" }}
           </button>
         </div>
       </div>

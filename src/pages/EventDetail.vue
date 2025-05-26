@@ -2,12 +2,10 @@
 import { ref, onMounted, onUnmounted, computed, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useEventStore } from "@/stores/event";
-import { useSidebarStore } from "@/sidebar";
 import { useToast } from "vue-toastification";
+import { useDarkModeStore } from "@/stores/darkMode"; // Add this import
 import DateUtils from "@/utils/DateUtils";
 import axiosClient from "@/axios";
-import Navbar from "@/components/layout/Navbar.vue";
-import Sidebar from "@/components/layout/Sidebar.vue";
 import EventHeader from "@/components/dashboard/EventHeader.vue";
 import Breadcrumbs from "@/components/layout/Breadcrumbs.vue";
 import CoverPhotoModal from "@/components/ui/CoverPhotoModal.vue";
@@ -25,11 +23,13 @@ import ScoresTab from "@/components/dashboard/ScoresTab.vue";
 import StageManagementTab from "@/components/dashboard/StageManagementTab.vue";
 import ChangeDivisionModal from "@/components/ui/ChangeDivisionModal.vue";
 import StatisticiansPanel from "@/components/dashboard/StatisticiansPanel.vue";
+import StartEventModal from "@/components/ui/StartEventModal.vue";
+import FinalizeEventModal from "@/components/ui/FinalizeEventModal.vue";
 
 const route = useRoute();
 const router = useRouter();
 const eventStore = useEventStore();
-const sidebar = useSidebarStore();
+const darkModeStore = useDarkModeStore(); // Add this
 const toast = useToast();
 
 const eventId = route.params.id;
@@ -43,14 +43,41 @@ const showDeleteEventModal = ref(false);
 const showChangeDivisionModal = ref(false);
 const imageTimestamp = ref(Date.now());
 const isLoading = ref(false);
+const showStartEventModal = ref(false);
+const showFinalizeEventModal = ref(false);
+const showPreview = ref(false);
+const previewUrl = ref("");
 
 const BACKEND_BASE_URL =
   import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
 const windowWidth = ref(window.innerWidth);
-const layoutShift = computed(() =>
-  sidebar.isOpen && windowWidth.value >= 1024 ? "ml-64" : "ml-0"
-);
+
+const isDarkMode = computed(() => darkModeStore.isDarkMode);
+
+// Add the missing eventStatus computed property
+const eventStatus = computed(() => {
+  return event.value?.status || "inactive";
+});
+
+const initializeDarkMode = () => {
+  const savedDarkMode = localStorage.getItem("darkMode");
+  if (savedDarkMode === "true") {
+    isDarkMode.value = true;
+    document.documentElement.classList.add("dark");
+  } else if (savedDarkMode === "false") {
+    isDarkMode.value = false;
+    document.documentElement.classList.remove("dark");
+  } else {
+    const systemPrefersDark = window.matchMedia(
+      "(prefers-color-scheme: dark)"
+    ).matches;
+    isDarkMode.value = systemPrefersDark;
+    if (systemPrefersDark) {
+      document.documentElement.classList.add("dark");
+    }
+  }
+};
 
 const tabs = computed(() => [
   { id: "overview", label: "Overview", disabled: false },
@@ -184,7 +211,7 @@ const handleConfirmReset = async () => {
     showResetEventModal.value = false;
     event.value = await eventStore.fetchEvent(eventId);
   } catch (err) {
-    toast.error(`Failed to reset event: ${err.message}`);
+    toast.error(`${err.message}`);
   } finally {
     isLoading.value = false;
   }
@@ -230,6 +257,7 @@ const handleEdit = () => {
   showEditEventModal.value = true;
 };
 
+// Update handleViewResults method in EventDetail.vue
 const handleViewResults = async () => {
   if (!event.value || event.value.status !== "completed") {
     toast.error(
@@ -244,13 +272,24 @@ const handleViewResults = async () => {
       `/api/v1/events/${eventId}/results/preview`,
       { responseType: "blob" }
     );
+
+    // response is the full axios response due to blob handling in interceptor
     const blob = new Blob([response.data], { type: "application/pdf" });
-    const url = window.URL.createObjectURL(blob);
-    window.open(url, "_blank");
+    previewUrl.value = window.URL.createObjectURL(blob);
+    showPreview.value = true;
   } catch (err) {
+    console.error("Preview error:", err);
     toast.error(`Failed to view results: ${err.message}`);
   } finally {
     isLoading.value = false;
+  }
+};
+
+const closePreview = () => {
+  showPreview.value = false;
+  if (previewUrl.value) {
+    window.URL.revokeObjectURL(previewUrl.value);
+    previewUrl.value = "";
   }
 };
 
@@ -258,7 +297,67 @@ const handleDelete = () => {
   showDeleteEventModal.value = true;
 };
 
+// Update handleStart method in EventDetail.vue
+// Update handleStart method in EventDetail.vue
 const handleStart = async () => {
+  // Check constraints before showing modal
+  const candidatesCount = event.value?.candidates_count || 0;
+  const judgesCount = event.value?.judges_count || 0;
+  const categoriesCount = event.value?.categories_count || 0;
+
+  if (candidatesCount < 1) {
+    toast.error("Cannot start event: At least 1 candidate is required.");
+    return;
+  }
+  if (judgesCount < 1) {
+    toast.error("Cannot start event: At least 1 judge is required.");
+    return;
+  }
+  if (categoriesCount < 1) {
+    toast.error("Cannot start event: At least 1 category is required.");
+    return;
+  }
+
+  // Fetch stages count - axios interceptor already returns response.data
+  try {
+    const stagesResponse = await axiosClient.get(
+      `/api/v1/events/${eventId}/stages`
+    );
+    // stagesResponse is already the data due to axios interceptor
+    const stagesData = Array.isArray(stagesResponse)
+      ? stagesResponse
+      : stagesResponse.data || [];
+    const stagesCount = stagesData.length || 0;
+
+    console.log("Stages check:", { stagesResponse, stagesData, stagesCount });
+
+    if (stagesCount < 1) {
+      toast.error("Cannot start event: At least 1 stage is required.");
+      return;
+    }
+  } catch (error) {
+    console.error("Error fetching stages:", error);
+    toast.error("Cannot verify stages. Please try again.");
+    return;
+  }
+
+  if (event.value?.status !== "inactive") {
+    toast.error("Only inactive events can be started.");
+    return;
+  }
+
+  showStartEventModal.value = true;
+};
+
+const handleFinalize = () => {
+  if (event.value?.status !== "active") {
+    toast.error("Only active events can be finalized.");
+    return;
+  }
+  showFinalizeEventModal.value = true;
+};
+
+const handleConfirmStart = async () => {
   try {
     isLoading.value = true;
     await eventStore.startEvent(eventId);
@@ -268,20 +367,18 @@ const handleStart = async () => {
     toast.error(`Failed to start event: ${err.message}`);
   } finally {
     isLoading.value = false;
+    showStartEventModal.value = false;
   }
 };
 
-const handleFinalize = async () => {
+const handleConfirmFinalize = async () => {
   try {
     isLoading.value = true;
-
     const response = await eventStore.finalizeEvent(eventId);
-
     toast.success("Event finalized successfully");
     event.value = await eventStore.fetchEvent(eventId);
   } catch (err) {
     console.error("Finalize error:", err);
-
     const serverMessage =
       err?.response?.data?.message ||
       err?.message ||
@@ -296,6 +393,7 @@ const handleFinalize = async () => {
     }
   } finally {
     isLoading.value = false;
+    showFinalizeEventModal.value = false;
   }
 };
 
@@ -325,6 +423,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener("resize", updateWindowWidth);
+  closePreview(); // Clean up PDF blob URL
 });
 
 watch(activeTab, (newTab) => {
@@ -333,23 +432,32 @@ watch(activeTab, (newTab) => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-100">
-    <Navbar />
-    <Sidebar />
-    <div class="transition-all duration-300" :class="layoutShift">
-      <EventHeader />
+  <div
+    class="min-h-screen transition-all duration-300"
+    :class="isDarkMode ? 'bg-gray-900' : 'bg-gray-100'"
+  >
+    <div class="transition-all duration-300">
       <Breadcrumbs
-        :items="[
-          { label: 'Dashboard', to: '/admin/dashboard' },
-          { label: event ? event.event_name : 'Event Details' },
-        ]"
+        :items="[{ label: 'Home', to: 'auto' }, { label: event.event_name }]"
       />
       <div class="container mx-auto px-4 py-6">
+        <!-- Loading state -->
         <div v-if="loading" class="flex justify-center py-12">
-          <i class="fas fa-spinner fa-spin text-3xl text-green-600"></i>
+          <i
+            class="fas fa-spinner fa-spin text-3xl"
+            :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+          ></i>
         </div>
+
+        <!-- Event content -->
         <div v-else-if="event" class="space-y-6">
-          <div class="bg-white rounded-lg shadow overflow-hidden">
+          <div
+            class="rounded-lg shadow overflow-hidden transition-colors duration-300"
+            :class="
+              isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white'
+            "
+          >
+            <!-- Cover photo section -->
             <div class="h-32 relative">
               <img
                 :src="getImageUrl"
@@ -366,11 +474,16 @@ watch(activeTab, (newTab) => {
                 <i class="fas fa-camera text-gray-700"></i>
               </button>
             </div>
+
+            <!-- Event details -->
             <div class="p-6">
               <div
                 class="flex flex-col md:flex-row md:items-center md:justify-between gap-2"
               >
-                <h1 class="text-2xl font-bold text-gray-800">
+                <h1
+                  class="text-2xl font-bold transition-colors duration-300"
+                  :class="isDarkMode ? 'text-white' : 'text-gray-800'"
+                >
                   {{ event.event_name }}
                 </h1>
                 <div class="flex flex-wrap gap-2 md:justify-end">
@@ -425,34 +538,83 @@ watch(activeTab, (newTab) => {
                   </div>
                 </div>
               </div>
-              <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+
+              <!-- Date information -->
+              <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <p class="text-sm text-gray-500">Start Date</p>
-                  <p class="font-medium">
+                  <p
+                    class="text-sm transition-colors duration-300"
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                  >
+                    <i class="fas fa-map-marker-alt mr-1"></i>
+                    Venue
+                  </p>
+                  <p
+                    class="font-medium transition-colors duration-300"
+                    :class="isDarkMode ? 'text-gray-200' : 'text-gray-900'"
+                  >
+                    {{ event.venue || "Not specified" }}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-sm transition-colors duration-300"
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                  >
+                    <i class="fas fa-calendar-plus mr-1"></i>
+                    Start Date
+                  </p>
+                  <p
+                    class="font-medium transition-colors duration-300"
+                    :class="isDarkMode ? 'text-gray-200' : 'text-gray-900'"
+                  >
                     {{ DateUtils.formatDateTime(event.start_date) }}
                   </p>
                 </div>
                 <div>
-                  <p class="text-sm text-gray-500">End Date</p>
-                  <p class="font-medium">
+                  <p
+                    class="text-sm transition-colors duration-300"
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                  >
+                    <i class="fas fa-calendar-check mr-1"></i>
+                    End Date
+                  </p>
+                  <p
+                    class="font-medium transition-colors duration-300"
+                    :class="isDarkMode ? 'text-gray-200' : 'text-gray-900'"
+                  >
                     {{ DateUtils.formatDateTime(event.end_date) }}
                   </p>
                 </div>
               </div>
             </div>
           </div>
-          <div class="bg-white rounded-lg shadow">
-            <div class="border-b">
+
+          <!-- Tabs section -->
+          <div
+            class="rounded-lg shadow transition-colors duration-300"
+            :class="
+              isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white'
+            "
+          >
+            <div
+              class="border-b transition-colors duration-300"
+              :class="isDarkMode ? 'border-gray-600' : 'border-gray-200'"
+            >
               <nav class="flex overflow-x-auto">
                 <button
                   v-for="tab in tabs"
                   :key="tab.id"
                   @click="activeTab = tab.id"
                   :disabled="tab.disabled"
-                  class="px-6 py-4 text-sm font-medium whitespace-nowrap"
+                  class="px-6 py-4 text-sm font-medium whitespace-nowrap transition-colors duration-300"
                   :class="[
                     activeTab === tab.id
-                      ? 'border-b-2 border-green-600 text-green-600'
+                      ? isDarkMode
+                        ? 'border-b-2 border-green-400 text-green-400'
+                        : 'border-b-2 border-green-600 text-green-600'
+                      : isDarkMode
+                      ? 'text-gray-300 hover:text-gray-100'
                       : 'text-gray-600 hover:text-gray-800',
                     tab.disabled ? 'opacity-50 cursor-not-allowed' : '',
                   ]"
@@ -477,6 +639,8 @@ watch(activeTab, (newTab) => {
                     :pending-judges="event.judges_with_pending_scores"
                   />
                   <EventActions
+                    :event-status="eventStatus"
+                    :is-dark-mode="isDarkMode"
                     @edit="handleEdit"
                     @view-results="handleViewResults"
                     @delete="handleDelete"
@@ -524,7 +688,62 @@ watch(activeTab, (newTab) => {
           </div>
         </div>
         <div v-else>
-          <p>No event data available.</p>
+          <p
+            class="transition-colors duration-300"
+            :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+          >
+            No event data available.
+          </p>
+        </div>
+      </div>
+    </div>
+    <!-- PDF Preview Modal -->
+    <div
+      v-if="showPreview"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 transition-all duration-300"
+      :class="isDarkMode ? 'bg-black/80' : 'bg-black/75'"
+    >
+      <div
+        class="w-full max-w-7xl h-[95vh] relative overflow-hidden rounded-2xl shadow-2xl transition-all duration-300"
+        :class="isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white'"
+      >
+        <div
+          class="flex justify-between items-center p-6 border-b transition-colors"
+          :class="
+            isDarkMode
+              ? 'bg-gray-700 border-gray-600'
+              : 'bg-gray-50 border-gray-200'
+          "
+        >
+          <div>
+            <h3
+              class="text-2xl font-bold transition-colors"
+              :class="isDarkMode ? 'text-white' : 'text-gray-800'"
+            >
+              <i class="fas fa-chart-line mr-2 text-blue-500"></i>
+              Results Preview
+            </h3>
+          </div>
+          <button
+            @click="closePreview"
+            class="w-10 h-10 flex items-center justify-center rounded-full transition-all duration-200"
+            :class="
+              isDarkMode
+                ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-600'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+            "
+          >
+            <i class="fas fa-times text-lg"></i>
+          </button>
+        </div>
+
+        <div class="h-[calc(95vh-88px)] p-4">
+          <iframe
+            :src="previewUrl"
+            class="w-full h-full border-0 rounded-lg shadow-inner"
+            title="PDF Preview"
+          >
+          </iframe>
         </div>
       </div>
     </div>
@@ -558,6 +777,20 @@ watch(activeTab, (newTab) => {
       :currentDivision="event?.division"
       @cancel="showChangeDivisionModal = false"
       @confirm="handleConfirmDivisionChange"
+    />
+    <StartEventModal
+      :show="showStartEventModal"
+      :loading="isLoading"
+      :is-dark-mode="isDarkMode"
+      @close="showStartEventModal = false"
+      @confirm="handleConfirmStart"
+    />
+    <FinalizeEventModal
+      :show="showFinalizeEventModal"
+      :loading="isLoading"
+      :is-dark-mode="isDarkMode"
+      @close="showFinalizeEventModal = false"
+      @confirm="handleConfirmFinalize"
     />
   </div>
 </template>

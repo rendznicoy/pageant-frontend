@@ -1,8 +1,12 @@
 <script setup>
 import { ref, computed } from "vue";
+import { useDarkModeStore } from "@/stores/darkMode";
 import { useToast } from "vue-toastification";
 
 const toast = useToast();
+
+// Reactive dark mode - CRITICAL: This is what was missing
+const isDarkMode = computed(() => darkModeStore.isDarkMode);
 
 const props = defineProps({
   errors: {
@@ -26,6 +30,7 @@ const newUser = ref({
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
 const formErrors = ref({});
+const darkModeStore = useDarkModeStore();
 
 // Validation rules
 const validateField = (field, value) => {
@@ -197,9 +202,11 @@ const isSubmitDisabled = computed(() => {
 <template>
   <div
     class="fixed inset-0 z-50 backdrop-blur-md flex items-center justify-center"
+    :class="isDarkMode ? 'bg-black/60' : 'bg-black/40'"
   >
     <div
-      class="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full relative max-h-[90vh] overflow-y-auto"
+      class="p-6 rounded-lg shadow-lg max-w-lg w-full relative max-h-[90vh] overflow-y-auto transition-colors duration-300"
+      :class="isDarkMode ? 'bg-gray-800' : 'bg-white'"
     >
       <button
         @click="
@@ -208,14 +215,24 @@ const isSubmitDisabled = computed(() => {
             resetForm();
           }
         "
-        class="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-xl font-bold z-70"
+        class="absolute top-2 right-2 text-xl font-bold z-70 p-2 rounded-full transition-colors duration-200"
+        :class="
+          isDarkMode
+            ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
+            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+        "
         aria-label="Close"
       >
-        <i class="fas fa-times text-4xl mr-2"></i>
+        <i class="fas fa-times text-xl"></i>
       </button>
 
       <!-- Title -->
-      <h2 class="text-2xl font-bold text-green-800 mb-6">Create New User</h2>
+      <h2
+        class="text-2xl font-bold mb-6 transition-colors duration-200"
+        :class="isDarkMode ? 'text-green-300' : 'text-green-800'"
+      >
+        Create New User
+      </h2>
 
       <!-- Form -->
       <form @submit.prevent="submitForm" class="space-y-5">
@@ -231,21 +248,27 @@ const isSubmitDisabled = computed(() => {
           }"
           :key="key"
         >
-          <label class="block text-sm font-medium text-gray-700 mb-1">{{
-            label
-          }}</label>
+          <label
+            class="block text-sm font-medium mb-1 transition-colors duration-200"
+            :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+          >
+            {{ label }}
+          </label>
           <div class="relative">
             <i
-              class="fas absolute left-3 top-3 text-gray-400"
-              :class="{
-                'fa-user':
-                  key === 'username' ||
-                  key === 'first_name' ||
-                  key === 'last_name',
-                'fa-envelope': key === 'email',
-                'fa-lock': key === 'password',
-                'fa-check': key === 'password_confirmation',
-              }"
+              class="fas absolute left-3 top-3 transition-colors duration-200"
+              :class="[
+                isDarkMode ? 'text-gray-500' : 'text-gray-400',
+                {
+                  'fa-user':
+                    key === 'username' ||
+                    key === 'first_name' ||
+                    key === 'last_name',
+                  'fa-envelope': key === 'email',
+                  'fa-lock': key === 'password',
+                  'fa-check': key === 'password_confirmation',
+                },
+              ]"
             ></i>
             <input
               :type="
@@ -256,14 +279,24 @@ const isSubmitDisabled = computed(() => {
               "
               v-model="newUser[key]"
               @input="handleInput(key)"
-              class="block w-full pl-10 pr-10 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-green-600 focus:outline-none border-gray-300"
+              class="block w-full pl-10 pr-10 py-2 border rounded-md shadow-sm focus:ring-2 focus:outline-none transition-colors duration-200"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-gray-100 focus:ring-green-400 placeholder-gray-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-green-600 placeholder-gray-500'
+              "
               :placeholder="label"
             />
             <!-- Toggle Visibility -->
             <button
               v-if="key === 'password' || key === 'password_confirmation'"
               type="button"
-              class="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+              class="absolute right-3 top-3 transition-colors duration-200"
+              :class="
+                isDarkMode
+                  ? 'text-gray-500 hover:text-gray-300'
+                  : 'text-gray-400 hover:text-gray-600'
+              "
               @click="
                 key === 'password' ? togglePassword() : toggleConfirmPassword()
               "
@@ -279,7 +312,8 @@ const isSubmitDisabled = computed(() => {
           </div>
           <p
             v-if="formErrors[key] || errors[key]"
-            class="text-sm text-red-600 mt-1"
+            class="text-sm mt-1 transition-colors duration-200"
+            :class="isDarkMode ? 'text-red-400' : 'text-red-600'"
           >
             {{ formErrors[key] || (errors[key] && errors[key][0]) }}
           </p>
@@ -287,25 +321,52 @@ const isSubmitDisabled = computed(() => {
 
         <!-- Role Selection -->
         <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1"
-            >Role</label
+          <label
+            class="block text-sm font-medium mb-1 transition-colors duration-200"
+            :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
           >
+            Role
+          </label>
           <div class="relative">
-            <i class="fas fa-user-tag absolute left-3 top-3 text-gray-400"></i>
+            <i
+              class="fas fa-user-tag absolute left-3 top-3 transition-colors duration-200"
+              :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'"
+            ></i>
             <select
               v-model="newUser.role"
               @input="handleInput('role')"
-              class="block w-full pl-10 pr-4 py-2 border rounded-md shadow-sm focus:ring-2 focus:ring-green-600 focus:outline-none border-gray-300"
+              class="block w-full pl-10 pr-4 py-2 border rounded-md shadow-sm focus:ring-2 focus:outline-none transition-colors duration-200"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-gray-100 focus:ring-green-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-green-600'
+              "
             >
-              <option disabled value="">Select Role</option>
-              <!-- ⬅️ Add this -->
-              <option value="admin">Admin</option>
-              <option value="tabulator">Tabulator</option>
+              <option
+                disabled
+                value=""
+                :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+              >
+                Select Role
+              </option>
+              <option
+                value="admin"
+                :class="isDarkMode ? 'text-gray-100' : 'text-gray-900'"
+              >
+                Admin
+              </option>
+              <option
+                value="tabulator"
+                :class="isDarkMode ? 'text-gray-100' : 'text-gray-900'"
+              >
+                Tabulator
+              </option>
             </select>
           </div>
           <p
             v-if="formErrors.role || errors.role"
-            class="text-sm text-red-600 mt-1"
+            class="text-sm mt-1 transition-colors duration-200"
+            :class="isDarkMode ? 'text-red-400' : 'text-red-600'"
           >
             {{ formErrors.role || (errors.role && errors.role[0]) }}
           </p>
@@ -315,7 +376,12 @@ const isSubmitDisabled = computed(() => {
         <div class="flex justify-end">
           <button
             type="submit"
-            class="px-5 py-2 bg-green-600 text-white font-medium rounded-md shadow hover:bg-green-700 transition"
+            class="px-5 py-2 text-white font-medium rounded-md shadow transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            :class="
+              isDarkMode
+                ? 'bg-green-700 hover:bg-green-600'
+                : 'bg-green-600 hover:bg-green-700'
+            "
             :disabled="isSubmitDisabled"
           >
             Create User

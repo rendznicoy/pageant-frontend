@@ -1,7 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useToast } from "vue-toastification";
-import { useRoute } from "vue-router";
 import axiosClient from "@/axios";
 
 let interval = null;
@@ -10,93 +9,427 @@ const { eventId, stageId } = defineProps(["eventId", "stageId"]);
 
 const toast = useToast();
 const finalResults = ref([]);
+const finalJudges = ref([]);
 const loading = ref(false);
+const exporting = ref(false);
 const showPreview = ref(false);
 const previewUrl = ref("");
 const stages = ref([]);
 const partialResultsByStage = ref({});
+const judgesByStage = ref({});
+const eventMaxScore = ref(100);
+const categoryResults = ref({});
+const isDarkMode = ref(false);
 
-const rankBySex = (candidates = []) => {
-  const males = candidates.filter((c) => c.sex?.toLowerCase() === "m");
-  const females = candidates.filter((c) => c.sex?.toLowerCase() === "f");
+// Whole-page pagination
+const currentPage = ref(1);
+const itemsPerPage = ref(1); // Show 1 section per page
 
-  const rankedMales = males
-    .sort((a, b) => b.raw_average - a.raw_average)
-    .map((c, index) => ({ ...c, rank: index + 1 }));
+// Create a computed property for all sections
+const allSections = computed(() => {
+  const sections = [];
 
-  const rankedFemales = females
-    .sort((a, b) => b.raw_average - a.raw_average)
-    .map((c, index) => ({ ...c, rank: index + 1 }));
+  // Final Results section
+  if (finalResults.value.length > 0) {
+    sections.push({
+      type: "final",
+      title: "Final Results",
+      data: finalResults.value,
+      judges: finalJudges.value,
+    });
+  }
 
-  return { males: rankedMales, females: rankedFemales };
+  // Category Results sections
+  Object.entries(categoryResults.value).forEach(([stageId, stageData]) => {
+    if (stageData?.categories?.length > 0) {
+      const stage = stages.value.find(
+        (s) => (s.id || s.stage_id).toString() === stageId.toString()
+      );
+      sections.push({
+        type: "category",
+        title: `Category Results – ${
+          stage?.name || stage?.stage_name || "Unknown Stage"
+        }`,
+        stageId: stageId,
+        data: stageData.categories,
+      });
+    }
+  });
+
+  // Stage Results sections
+  Object.entries(partialResultsByStage.value).forEach(
+    ([stageId, stageData]) => {
+      if (stageData?.males?.length > 0 || stageData?.females?.length > 0) {
+        const stage = stages.value.find(
+          (s) => (s.id || s.stage_id).toString() === stageId.toString()
+        );
+        sections.push({
+          type: "stage",
+          title: `Stage Results – ${
+            stage?.name || stage?.stage_name || "Unknown Stage"
+          }`,
+          stageId: stageId,
+          data: stageData,
+        });
+      }
+    }
+  );
+
+  return sections;
+});
+
+const totalPages = computed(() => allSections.value.length);
+
+const currentSection = computed(() => {
+  return allSections.value[currentPage.value - 1] || null;
+});
+
+// Navigation functions
+const goToPage = (page) => {
+  if (page >= 1 && page <= totalPages.value) {
+    currentPage.value = page;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 };
 
-const fetchAllPartialResults = async () => {
-  console.log("[fetchAllPartialResults] called with eventId:", eventId);
+const nextPage = () => {
+  if (currentPage.value < totalPages.value) {
+    goToPage(currentPage.value + 1);
+  }
+};
+
+const prevPage = () => {
+  if (currentPage.value > 1) {
+    goToPage(currentPage.value - 1);
+  }
+};
+
+//  Auto-refresh functionality
+const startAutoRefresh = () => {
+  if (interval) clearInterval(interval);
+  interval = setInterval(() => {
+    if (eventId) {
+      console.log("Auto-refreshing results...");
+      fetchFinalResults();
+      fetchAllPartialResults();
+      fetchCategoryResults();
+    }
+  }, 30000);
+};
+
+const stopAutoRefresh = () => {
+  if (interval) {
+    clearInterval(interval);
+    interval = null;
+  }
+};
+
+// Dark mode initialization
+const initializeDarkMode = () => {
+  const savedDarkMode = localStorage.getItem("darkMode");
+  if (savedDarkMode === "true") {
+    isDarkMode.value = true;
+    document.documentElement.classList.add("dark");
+  } else if (savedDarkMode === "false") {
+    isDarkMode.value = false;
+    document.documentElement.classList.remove("dark");
+  } else {
+    const systemPrefersDark = window.matchMedia(
+      "(prefers-color-scheme: dark)"
+    ).matches;
+    isDarkMode.value = systemPrefersDark;
+    if (systemPrefersDark) {
+      document.documentElement.classList.add("dark");
+    }
+  }
+};
+
+//  CSV Export
+const exportResultsCSV = async () => {
+  if (!finalResults.value.length && !finalJudges.value.length) {
+    toast.info("No results to export.");
+    return;
+  }
+
+  exporting.value = true;
+  try {
+    const csvData = [];
+    const headers = [
+      "Candidate Number",
+      "Candidate Name",
+      "Team",
+      "Sex",
+      "Mean Rating",
+      "Overall Rank",
+    ];
+    csvData.push(headers);
+
+    // Use the same ranking logic as the display
+    const { males: maleResults, females: femaleResults } = rankBySex(
+      finalResults.value,
+      true
+    );
+
+    if (maleResults.length > 0) {
+      csvData.push(["=== MALE CANDIDATES ==="]);
+      maleResults.forEach((result) => {
+        const row = [
+          result.candidate.candidate_number,
+          `${result.candidate.first_name} ${result.candidate.last_name}`,
+          result.candidate.team || "N/A",
+          "Male",
+          Number(result.mean_rating || result.raw_average || 0).toFixed(2),
+          result.rank || result.overall_rank || "N/A", // Use the rank assigned by rankBySex
+        ];
+        csvData.push(row);
+      });
+    }
+
+    if (femaleResults.length > 0) {
+      csvData.push([""]);
+      csvData.push(["=== FEMALE CANDIDATES ==="]);
+      femaleResults.forEach((result) => {
+        const row = [
+          result.candidate.candidate_number,
+          `${result.candidate.first_name} ${result.candidate.last_name}`,
+          result.candidate.team || "N/A",
+          "Female",
+          Number(result.mean_rating || result.raw_average || 0).toFixed(2),
+          result.rank || result.overall_rank || "N/A", // Use the rank assigned by rankBySex
+        ];
+        csvData.push(row);
+      });
+    }
+
+    const csvContent = csvData
+      .map((row) =>
+        row
+          .map((field) =>
+            typeof field === "string" && field.includes(",")
+              ? `"${field.replace(/"/g, '""')}"`
+              : field
+          )
+          .join(",")
+      )
+      .join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `event_${eventId}_results.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+
+    toast.success("Results exported successfully!");
+  } catch (error) {
+    console.error("Export error:", error);
+    toast.error("Failed to export results: " + error.message);
+  } finally {
+    exporting.value = false;
+  }
+};
+
+// Manual refresh function
+const refreshResults = async () => {
+  let hasErrors = false;
+  const errors = [];
+
+  try {
+    await fetchFinalResults();
+  } catch (error) {
+    hasErrors = true;
+    errors.push("final results");
+    console.error("Error fetching final results:", error);
+  }
+
+  try {
+    await fetchAllPartialResults();
+  } catch (error) {
+    hasErrors = true;
+    errors.push("partial results");
+    console.error("Error fetching partial results:", error);
+  }
+
+  try {
+    await fetchCategoryResults();
+  } catch (error) {
+    hasErrors = true;
+    errors.push("category results");
+    console.error("Error fetching category results:", error);
+  }
+
+  if (hasErrors) {
+    toast.error(
+      `Failed to refresh: ${errors.join(", ")}. Check console for details.`
+    );
+  } else {
+    toast.success("Results refreshed!");
+  }
+};
+
+// Ranking function
+const rankBySex = (candidates = [], useCorrectLogic = true) => {
+  if (!useCorrectLogic) {
+    const males = candidates.filter((c) => c.sex?.toLowerCase() === "m");
+    const females = candidates.filter((c) => c.sex?.toLowerCase() === "f");
+    return { males, females };
+  }
+
+  const activeCandidates = candidates.filter(
+    (c) => c.candidate?.is_active !== false
+  );
+
+  const males = activeCandidates.filter((c) => c.sex?.toLowerCase() === "m");
+  const females = activeCandidates.filter((c) => c.sex?.toLowerCase() === "f");
+
+  // Sort by mean_rank (ascending), then by mean_rating (descending)
+  const sortedMales = males
+    .sort((a, b) => {
+      if ((a.mean_rank || 999) === (b.mean_rank || 999)) {
+        return (b.mean_rating || 0) - (a.mean_rating || 0);
+      }
+      return (a.mean_rank || 999) - (b.mean_rank || 999);
+    })
+    .map((candidate, index) => ({
+      ...candidate,
+      rank: index + 1,
+    }));
+
+  const sortedFemales = females
+    .sort((a, b) => {
+      if ((a.mean_rank || 999) === (b.mean_rank || 999)) {
+        return (b.mean_rating || 0) - (a.mean_rating || 0);
+      }
+      return (a.mean_rank || 999) - (b.mean_rank || 999);
+    })
+    .map((candidate, index) => ({
+      ...candidate,
+      rank: index + 1,
+    }));
+
+  return { males: sortedMales, females: sortedFemales };
+};
+
+// Score color logic
+const getScoreColorClass = (score, maxScore = null) => {
+  const actualMaxScore = maxScore || eventMaxScore.value;
+  const percentage = (score / actualMaxScore) * 100;
+
+  if (percentage < 60)
+    return isDarkMode.value
+      ? "bg-red-800 text-red-200"
+      : "bg-red-100 text-red-800";
+  if (percentage >= 60 && percentage < 80)
+    return isDarkMode.value
+      ? "bg-yellow-800 text-yellow-200"
+      : "bg-yellow-100 text-yellow-800";
+  return isDarkMode.value
+    ? "bg-green-800 text-green-200"
+    : "bg-green-100 text-green-800";
+};
+
+// Fetch category results with better error handling
+const fetchCategoryResults = async () => {
   if (!eventId) return;
 
   try {
+    // Wait for stages to be loaded first
+    if (!stages.value.length) {
+      await fetchAllPartialResults();
+    }
+
+    const promises = stages.value.map(async (stage) => {
+      const stageId = stage.id || stage.stage_id;
+      try {
+        const categoryRes = await axiosClient.get(
+          `/api/v1/events/${eventId}/stages/${stageId}/category-results`
+        );
+        categoryResults.value[stageId] = categoryRes.data || categoryRes;
+      } catch (stageError) {
+        console.error(
+          `Error fetching category results for stage ${stageId}:`,
+          stageError
+        );
+      }
+    });
+
+    await Promise.all(promises);
+  } catch (error) {
+    console.error("Error fetching category results:", error);
+  }
+};
+
+// e5e7eb partial results fetching
+const fetchAllPartialResults = async () => {
+  if (!eventId) return;
+
+  try {
+    const eventResponse = await axiosClient.get(`/api/v1/events/${eventId}`);
+    const eventData = eventResponse.data || eventResponse;
+    eventMaxScore.value =
+      eventData.max_score || eventData.global_max_score || 100;
+
     const res = await axiosClient.get(`/api/v1/events/${eventId}/stages`);
     stages.value = Array.isArray(res) ? res : res.data ?? [];
 
-    console.log("Stages received:", stages.value);
-
     for (const stage of stages.value) {
-      if (!stage.id) {
-        console.warn("Stage missing id:", stage);
-        continue;
+      const stageId = stage.id || stage.stage_id;
+
+      try {
+        const partial = await axiosClient.get(
+          `/api/v1/events/${eventId}/stages/${stageId}/partial-results`
+        );
+
+        const { males, females } = rankBySex(partial.candidates || [], true);
+        partialResultsByStage.value[stageId] = { males, females };
+        judgesByStage.value[stageId] = partial.judges || [];
+      } catch (stageError) {
+        console.error(
+          `Error fetching partial results for stage ${stageId}:`,
+          stageError
+        );
       }
-
-      const partial = await axiosClient.get(
-        `/api/v1/events/${eventId}/stages/${stage.id}/partial-results`
-      );
-
-      const { males, females } = rankBySex(partial.candidates || []);
-      partialResultsByStage.value[stage.id] = { males, females };
     }
-
-    console.log("partialResultsByStage:", partialResultsByStage.value);
   } catch (e) {
     console.error("Error fetching partial results:", e);
   }
 };
 
+// e5e7eb final results
 const fetchFinalResults = async () => {
-  console.log("[fetchFinalResults] called with eventId:", eventId);
   if (!eventId) {
-    toast.error("Missing event ID.");
-    return;
+    throw new Error("Missing event ID");
   }
 
   loading.value = true;
   try {
+    const eventResponse = await axiosClient.get(`/api/v1/events/${eventId}`);
+    const eventData = eventResponse.data || eventResponse;
+    eventMaxScore.value =
+      eventData.max_score || eventData.global_max_score || 100;
+
     const data = await axiosClient.get(
       `/api/v1/events/${eventId}/scores/final-results`
     );
 
-    console.log("✅ Final results API response:", data);
-
     finalResults.value = Array.isArray(data?.candidates) ? data.candidates : [];
-
-    console.log("✅ FinalResults.value length:", finalResults.value.length);
+    finalJudges.value = Array.isArray(data?.judges) ? data.judges : [];
 
     if (!finalResults.value.length) {
-      toast.info("No final results available yet.");
+      console.info("No final results available yet.");
     }
   } catch (error) {
     console.error("Error fetching final results:", error);
-    toast.error(
-      error.response?.data?.message || "Failed to load final results."
-    );
+    throw error;
   } finally {
     loading.value = false;
   }
 };
 
-const rankedFinal = computed(() => rankBySex(finalResults.value));
-const maleResults = computed(() => rankedFinal.value.males);
-const femaleResults = computed(() => rankedFinal.value.females);
-
+// PDF functions
 const downloadReport = async () => {
   if (!finalResults.value.length) {
     toast.info("No results to download.");
@@ -109,12 +442,10 @@ const downloadReport = async () => {
       responseType: "blob",
     });
 
-    // Check if it's already a Blob or wrap it
     const blob =
       response instanceof Blob
         ? response
         : new Blob([response], { type: "application/pdf" });
-
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -138,21 +469,27 @@ const previewReport = async () => {
     toast.info("No results to preview.");
     return;
   }
+
   loading.value = true;
   try {
     const response = await axiosClient.get(
-      `/api/v1/events/${eventId}/results/preview?event_id=${eventId}`,
-      { responseType: "blob" }
+      `/api/v1/events/${eventId}/results/preview`,
+      {
+        responseType: "blob",
+      }
     );
 
-    const blob =
-      response instanceof Blob
-        ? response
-        : new Blob([response], { type: "application/pdf" });
+    // Handle both cases - with and without interceptor transformation
+    const blob = response.data
+      ? new Blob([response.data], { type: "application/pdf" })
+      : response instanceof Blob
+      ? response
+      : new Blob([response], { type: "application/pdf" });
 
     previewUrl.value = window.URL.createObjectURL(blob);
     showPreview.value = true;
   } catch (error) {
+    console.error("Preview error:", error);
     toast.error(error.response?.data?.message || "Failed to preview report.");
   } finally {
     loading.value = false;
@@ -167,270 +504,962 @@ const closePreview = () => {
   }
 };
 
-onMounted(() => {
-  console.log("onMounted called, eventId:", eventId);
+onMounted(async () => {
+  initializeDarkMode();
   if (eventId) {
-    fetchFinalResults();
-    fetchAllPartialResults();
+    loading.value = true;
+    try {
+      await Promise.all([fetchFinalResults(), fetchAllPartialResults()]);
+      // Fetch category results after stages are loaded
+      await fetchCategoryResults();
+    } catch (error) {
+      console.error("Error during initial load:", error);
+    } finally {
+      loading.value = false;
+    }
+    startAutoRefresh();
   }
 });
 
 onUnmounted(() => {
-  if (interval) clearInterval(interval);
+  stopAutoRefresh();
 });
 </script>
 
 <template>
-  <div class="space-y-6">
-    <!-- Final Results Section -->
-    <div class="bg-green-100 rounded-lg shadow-lg p-6">
-      <div class="flex justify-between items-center mb-4">
-        <div class="flex items-center space-x-2">
-          <i class="fas fa-trophy text-yellow-600 text-2xl"></i>
-          <h2 class="text-2xl font-bold text-green-900">Final Results</h2>
+  <div
+    class="space-y-8 transition-colors duration-300 min-h-screen"
+    :class="isDarkMode ? 'bg-gray-900' : 'bg-gray-50'"
+  >
+    <!-- Header with Navigation -->
+    <div
+      class="rounded-xl shadow-lg p-6 transition-all duration-300"
+      :class="
+        isDarkMode
+          ? 'bg-gray-800 border border-gray-700'
+          : 'bg-gradient-to-r from-green-50 to-emerald-50'
+      "
+    >
+      <!-- Header controls -->
+      <div
+        class="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 space-y-4 lg:space-y-0"
+      >
+        <div class="flex items-center space-x-3">
+          <div class="bg-yellow-500 p-3 rounded-full">
+            <i class="fas fa-trophy text-white text-2xl"></i>
+          </div>
+          <div>
+            <h2
+              class="text-2xl lg:text-3xl font-bold transition-colors"
+              :class="isDarkMode ? 'text-white' : 'text-green-900'"
+            >
+              {{ currentSection?.title || "Results" }}
+            </h2>
+            <p
+              class="text-sm transition-colors"
+              :class="isDarkMode ? 'text-gray-300' : 'text-green-700'"
+            >
+              (Max Score: {{ eventMaxScore }})
+            </p>
+          </div>
         </div>
-        <div class="flex space-x-2">
+
+        <!-- Action buttons -->
+        <div class="flex flex-wrap gap-2">
+          <button
+            @click="refreshResults"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            :class="
+              isDarkMode
+                ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
+                : 'bg-gray-600 text-white hover:bg-gray-700'
+            "
+            :disabled="loading"
+          >
+            <i class="fas fa-sync-alt" :class="{ 'fa-spin': loading }"></i>
+            {{ loading ? "Refreshing..." : "Refresh" }}
+          </button>
+
+          <button
+            @click="exportResultsCSV"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            :class="
+              isDarkMode
+                ? 'bg-purple-700 hover:bg-purple-600 text-purple-100'
+                : 'bg-purple-600 text-white hover:bg-purple-700'
+            "
+            :disabled="exporting || !finalResults.length"
+          >
+            <i class="fas fa-file-csv" :class="{ 'fa-spin': exporting }"></i>
+            {{ exporting ? "Exporting..." : "Export CSV" }}
+          </button>
+
           <button
             @click="previewReport"
-            class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            :class="
+              isDarkMode
+                ? 'bg-blue-700 hover:bg-blue-600 text-blue-100'
+                : 'bg-blue-600 text-white hover:bg-blue-700'
+            "
             :disabled="loading || !eventId"
           >
             <i class="fas fa-eye"></i>
-            {{ loading ? "Loading..." : "Preview Results" }}
+            {{ loading ? "Loading..." : "Preview PDF" }}
           </button>
+
           <button
             @click="downloadReport"
-            class="flex items-center gap-2 px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800 transition"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            :class="
+              isDarkMode
+                ? 'bg-green-700 hover:bg-green-600 text-green-100'
+                : 'bg-green-700 text-white hover:bg-green-800'
+            "
             :disabled="loading || !eventId"
           >
             <i class="fas fa-download"></i>
-            {{ loading ? "Downloading..." : "Download PDF Report" }}
+            {{ loading ? "Downloading..." : "Download PDF" }}
           </button>
         </div>
       </div>
 
-      <div v-if="loading" class="flex justify-center py-12">
-        <i class="fas fa-spinner fa-spin text-3xl text-green-600"></i>
+      <!-- Auto-refresh indicator -->
+      <div
+        class="flex items-center text-sm mb-4 transition-colors"
+        :class="isDarkMode ? 'text-gray-400' : 'text-green-600'"
+      >
+        <i class="fas fa-sync-alt fa-spin mr-2 opacity-50"></i>
+        Auto-refreshing every 30 seconds
       </div>
 
+      <!-- Page Navigation -->
       <div
-        v-else-if="finalResults.length"
-        class="grid grid-cols-1 md:grid-cols-2 gap-6"
+        v-if="totalPages > 1"
+        class="flex justify-between items-center py-4 border-t transition-colors"
+        :class="isDarkMode ? 'border-gray-600' : 'border-gray-300'"
       >
-        <!-- Male Final Results -->
-        <div class="bg-white rounded-lg shadow p-4">
-          <h3 class="text-lg font-semibold text-gray-900 mb-4">
-            Male Candidates
-          </h3>
-          <table class="min-w-full divide-y divide-gray-200 text-sm">
-            <thead class="bg-gray-50">
-              <tr>
-                <th
-                  class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                >
-                  Rank
-                </th>
-                <th
-                  class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                >
-                  Candidate
-                </th>
-                <th
-                  class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                >
-                  Raw Average
-                </th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr
-                v-for="(result, index) in maleResults"
-                :key="result.candidate_id"
-              >
-                <td class="px-4 py-2">{{ index + 1 }}</td>
-                <td class="px-4 py-2">
-                  {{ result.candidate.first_name }}
-                  {{ result.candidate.last_name }} (#{{
-                    result.candidate.candidate_number
-                  }})
-                </td>
-                <td class="px-4 py-2">
-                  {{ Number(result.raw_average).toFixed(2) }}/100
-                </td>
-              </tr>
-              <tr v-if="!maleResults.length">
-                <td colspan="3" class="px-4 py-2 text-sm text-gray-500">
-                  No male candidates scored yet.
-                </td>
-              </tr>
-            </tbody>
-          </table>
+        <div
+          class="text-sm transition-colors"
+          :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+        >
+          Showing {{ currentPage }} of {{ totalPages }} sections
         </div>
 
-        <!-- Female Final Results -->
-        <div class="bg-white rounded-lg shadow p-4">
-          <h3 class="text-lg font-semibold text-gray-900 mb-4">
-            Female Candidates
-          </h3>
-          <table class="min-w-full divide-y divide-gray-200 text-sm">
-            <thead class="bg-gray-50">
-              <tr>
-                <th
-                  class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                >
-                  Rank
-                </th>
-                <th
-                  class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                >
-                  Candidate
-                </th>
-                <th
-                  class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                >
-                  Raw Average
-                </th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr
-                v-for="(result, index) in femaleResults"
-                :key="result.candidate_id"
+        <div class="flex items-center space-x-2">
+          <button
+            @click="prevPage"
+            :disabled="currentPage === 1"
+            class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200"
+            :class="
+              currentPage === 1
+                ? isDarkMode
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : isDarkMode
+                ? 'bg-blue-700 hover:bg-blue-600 text-blue-100'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            "
+          >
+            <i class="fas fa-chevron-left mr-2"></i>
+            Previous
+          </button>
+
+          <div class="flex items-center space-x-1">
+            <template v-for="page in totalPages" :key="page">
+              <button
+                v-if="
+                  page === 1 ||
+                  page === totalPages ||
+                  Math.abs(page - currentPage) <= 2
+                "
+                @click="goToPage(page)"
+                class="px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200"
+                :class="
+                  page === currentPage
+                    ? isDarkMode
+                      ? 'bg-blue-700 text-blue-100'
+                      : 'bg-blue-600 text-white'
+                    : isDarkMode
+                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                "
               >
-                <td class="px-4 py-2">{{ index + 1 }}</td>
-                <td class="px-4 py-2">
-                  {{ result.candidate.first_name }}
-                  {{ result.candidate.last_name }} (#{{
-                    result.candidate.candidate_number
-                  }})
-                </td>
-                <td class="px-4 py-2">
-                  {{ Number(result.raw_average).toFixed(2) }}/100
-                </td>
-              </tr>
-              <tr v-if="!femaleResults.length">
-                <td colspan="3" class="px-4 py-2 text-sm text-gray-500">
-                  No female candidates scored yet.
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                {{ page }}
+              </button>
+              <span
+                v-else-if="
+                  (page === 2 && currentPage > 4) ||
+                  (page === totalPages - 1 && currentPage < totalPages - 3)
+                "
+                class="px-2 py-2 text-sm"
+                :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+              >
+                ...
+              </span>
+            </template>
+          </div>
+
+          <button
+            @click="nextPage"
+            :disabled="currentPage === totalPages"
+            class="flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200"
+            :class="
+              currentPage === totalPages
+                ? isDarkMode
+                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                  : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                : isDarkMode
+                ? 'bg-blue-700 hover:bg-blue-600 text-blue-100'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+            "
+          >
+            Next
+            <i class="fas fa-chevron-right ml-2"></i>
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- Partial Results by Stage -->
-    <!-- Partial Results by Stage -->
-    <div v-for="stage in stages" :key="stage.id" class="space-y-6">
-      <div>
-        <h3 class="text-xl font-semibold text-gray-800 mb-4">
-          Partial Results – {{ stage.name }}
-        </h3>
-        <div class="flex flex-col md:flex-row gap-6">
-          <!-- Male -->
+    <!-- Loading State -->
+    <div v-if="loading" class="flex flex-col items-center justify-center py-16">
+      <div class="relative">
+        <div
+          :class="
+            isDarkMode
+              ? 'border-green-800 border-t-green-400'
+              : 'border-green-200 border-t-green-600'
+          "
+          class="w-16 h-16 border-4 rounded-full animate-spin"
+        ></div>
+        <div class="absolute inset-0 flex items-center justify-center">
+          <i
+            :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+            class="fas fa-trophy text-lg"
+          ></i>
+        </div>
+      </div>
+      <p
+        :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+        class="mt-4 font-medium"
+      >
+        Loading results...
+      </p>
+    </div>
+
+    <!-- Current Section Content -->
+    <div v-else-if="currentSection" class="space-y-8">
+      <!-- Final Results Section -->
+      <div v-if="currentSection.type === 'final'" class="space-y-8">
+        <!-- Male Results -->
+        <div
+          class="rounded-xl shadow-lg overflow-hidden transition-all duration-300"
+          :class="
+            isDarkMode ? 'bg-gray-700 border border-gray-600' : 'bg-white'
+          "
+        >
           <div
-            class="bg-white rounded-lg shadow p-6 w-full md:w-1/2 overflow-x-auto"
+            class="p-4 transition-colors"
+            :class="
+              isDarkMode
+                ? 'bg-blue-800 text-blue-100'
+                : 'bg-blue-600 text-white'
+            "
           >
-            <h4 class="text-lg font-semibold text-gray-700 mb-3">
-              Male Candidates
-            </h4>
-            <table class="min-w-full divide-y divide-gray-200 text-sm">
-              <thead class="bg-gray-50">
+            <h3 class="text-xl font-semibold flex items-center">
+              <i class="fas fa-male mr-2"></i>
+              Male Candidates ({{ rankBySex(finalResults, true).males.length }})
+            </h3>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table
+              class="min-w-full divide-y transition-colors"
+              :class="isDarkMode ? 'divide-gray-600' : 'divide-gray-200'"
+            >
+              <thead
+                class="transition-colors"
+                :class="isDarkMode ? 'bg-gray-600' : 'bg-gray-50'"
+              >
                 <tr>
                   <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
                   >
                     Rank
                   </th>
                   <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
                   >
                     Candidate
                   </th>
                   <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
                   >
-                    Raw Average
+                    Mean Rating
+                  </th>
+                  <th
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
+                  >
+                    Mean Rank
                   </th>
                 </tr>
               </thead>
-              <tbody class="bg-white divide-y divide-gray-200">
+              <tbody
+                class="divide-y transition-colors"
+                :class="
+                  isDarkMode
+                    ? 'bg-gray-700 divide-gray-600'
+                    : 'bg-white divide-gray-200'
+                "
+              >
                 <tr
-                  v-for="(result, index) in partialResultsByStage[stage.id]
-                    ?.males || []"
+                  v-for="result in rankBySex(finalResults, true).males"
                   :key="result.candidate_id"
+                  class="transition-colors hover:opacity-80"
+                  :class="isDarkMode ? 'hover:bg-gray-600' : 'hover:bg-gray-50'"
                 >
-                  <td class="px-6 py-4">{{ index + 1 }}</td>
-                  <td class="px-6 py-4">
-                    {{ result.candidate.first_name }}
-                    {{ result.candidate.last_name }} (#{{
-                      result.candidate.candidate_number
-                    }})
+                  <td class="px-3 py-4 whitespace-nowrap">
+                    <div class="flex items-center">
+                      <span
+                        class="text-2xl font-bold transition-colors"
+                        :class="isDarkMode ? 'text-white' : 'text-gray-900'"
+                      >
+                        {{ result.overall_rank || result.rank }}
+                      </span>
+                      <i
+                        v-if="(result.overall_rank || result.rank) === 1"
+                        class="fas fa-crown text-yellow-500 ml-2"
+                      ></i>
+                    </div>
                   </td>
-                  <td class="px-6 py-4">
-                    {{ Number(result.raw_average).toFixed(2) }}/100
+                  <td class="px-3 py-4">
+                    <div class="min-w-0">
+                      <div
+                        class="text-sm font-medium truncate transition-colors"
+                        :class="isDarkMode ? 'text-white' : 'text-gray-900'"
+                      >
+                        {{ result.candidate.first_name }}
+                        {{ result.candidate.last_name }}
+                      </div>
+                      <div
+                        class="text-xs truncate transition-colors"
+                        :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                      >
+                        #{{ result.candidate.candidate_number }} -
+                        {{ result.candidate.team }}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-3 py-4 whitespace-nowrap">
+                    <span
+                      class="px-2 py-1 rounded-full text-xs font-medium"
+                      :class="
+                        getScoreColorClass(result.mean_rating, eventMaxScore)
+                      "
+                    >
+                      {{ Number(result.mean_rating || 0).toFixed(1) }}/{{
+                        eventMaxScore
+                      }}
+                    </span>
+                  </td>
+                  <td class="px-3 py-4 whitespace-nowrap">
+                    <span
+                      class="text-sm transition-colors"
+                      :class="isDarkMode ? 'text-gray-300' : 'text-gray-900'"
+                    >
+                      {{ Number(result.mean_rank || 0).toFixed(2) }}
+                    </span>
                   </td>
                 </tr>
-                <tr v-if="!partialResultsByStage[stage.id]?.males?.length">
-                  <td colspan="3" class="px-6 py-4 text-sm text-gray-500">
-                    No male candidates scored for this stage yet.
+                <tr v-if="!rankBySex(finalResults, true).males.length">
+                  <td
+                    colspan="4"
+                    class="px-6 py-8 text-center transition-colors"
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                  >
+                    No active male candidates scored yet.
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
+        </div>
 
-          <!-- Female -->
+        <!-- Female Results -->
+        <div
+          class="rounded-xl shadow-lg overflow-hidden transition-all duration-300"
+          :class="
+            isDarkMode ? 'bg-gray-700 border border-gray-600' : 'bg-white'
+          "
+        >
           <div
-            class="bg-white rounded-lg shadow p-6 w-full md:w-1/2 overflow-x-auto"
+            class="p-4 transition-colors"
+            :class="
+              isDarkMode
+                ? 'bg-pink-800 text-pink-100'
+                : 'bg-pink-600 text-white'
+            "
           >
-            <h4 class="text-lg font-semibold text-gray-700 mb-3">
-              Female Candidates
-            </h4>
-            <table class="min-w-full divide-y divide-gray-200 text-sm">
-              <thead class="bg-gray-50">
+            <h3 class="text-xl font-semibold flex items-center">
+              <i class="fas fa-female mr-2"></i>
+              Female Candidates ({{
+                rankBySex(finalResults, true).females.length
+              }})
+            </h3>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table
+              class="min-w-full divide-y transition-colors"
+              :class="isDarkMode ? 'divide-gray-600' : 'divide-gray-200'"
+            >
+              <thead
+                class="transition-colors"
+                :class="isDarkMode ? 'bg-gray-600' : 'bg-gray-50'"
+              >
                 <tr>
                   <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
                   >
                     Rank
                   </th>
                   <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
                   >
                     Candidate
                   </th>
                   <th
-                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
                   >
-                    Raw Average
+                    Mean Rating
+                  </th>
+                  <th
+                    class="px-3 py-3 text-left text-xs font-medium uppercase tracking-wider transition-colors"
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
+                  >
+                    Mean Rank
                   </th>
                 </tr>
               </thead>
-              <tbody class="bg-white divide-y divide-gray-200">
+              <tbody
+                class="divide-y transition-colors"
+                :class="
+                  isDarkMode
+                    ? 'bg-gray-700 divide-gray-600'
+                    : 'bg-white divide-gray-200'
+                "
+              >
                 <tr
-                  v-for="(result, index) in partialResultsByStage[stage.id]
-                    ?.females || []"
+                  v-for="result in rankBySex(finalResults, true).females"
                   :key="result.candidate_id"
+                  class="transition-colors hover:opacity-80"
+                  :class="isDarkMode ? 'hover:bg-gray-600' : 'hover:bg-gray-50'"
                 >
-                  <td class="px-6 py-4">{{ index + 1 }}</td>
-                  <td class="px-6 py-4">
-                    {{ result.candidate.first_name }}
-                    {{ result.candidate.last_name }} (#{{
-                      result.candidate.candidate_number
-                    }})
+                  <td class="px-3 py-4 whitespace-nowrap">
+                    <div class="flex items-center">
+                      <span
+                        class="text-2xl font-bold transition-colors"
+                        :class="isDarkMode ? 'text-white' : 'text-gray-900'"
+                      >
+                        {{ result.overall_rank || result.rank }}
+                      </span>
+                      <i
+                        v-if="(result.overall_rank || result.rank) === 1"
+                        class="fas fa-crown text-yellow-500 ml-2"
+                      ></i>
+                    </div>
                   </td>
-                  <td class="px-6 py-4">
-                    {{ Number(result.raw_average).toFixed(2) }}/100
+                  <td class="px-3 py-4">
+                    <div class="min-w-0">
+                      <div
+                        class="text-sm font-medium truncate transition-colors"
+                        :class="isDarkMode ? 'text-white' : 'text-gray-900'"
+                      >
+                        {{ result.candidate.first_name }}
+                        {{ result.candidate.last_name }}
+                      </div>
+                      <div
+                        class="text-xs truncate transition-colors"
+                        :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                      >
+                        #{{ result.candidate.candidate_number }} -
+                        {{ result.candidate.team }}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-3 py-4 whitespace-nowrap">
+                    <span
+                      class="px-2 py-1 rounded-full text-xs font-medium"
+                      :class="
+                        getScoreColorClass(result.mean_rating, eventMaxScore)
+                      "
+                    >
+                      {{ Number(result.mean_rating || 0).toFixed(1) }}/{{
+                        eventMaxScore
+                      }}
+                    </span>
+                  </td>
+                  <td class="px-3 py-4 whitespace-nowrap">
+                    <span
+                      class="text-sm transition-colors"
+                      :class="isDarkMode ? 'text-gray-300' : 'text-gray-900'"
+                    >
+                      {{ Number(result.mean_rank || 0).toFixed(2) }}
+                    </span>
                   </td>
                 </tr>
-                <tr v-if="!partialResultsByStage[stage.id]?.females?.length">
-                  <td colspan="3" class="px-6 py-4 text-sm text-gray-500">
-                    No female candidates scored for this stage yet.
+                <tr v-if="!rankBySex(finalResults, true).females.length">
+                  <td
+                    colspan="4"
+                    class="px-6 py-8 text-center transition-colors"
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                  >
+                    No active female candidates scored yet.
                   </td>
                 </tr>
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Category Results Section -->
+      <div v-else-if="currentSection.type === 'category'" class="space-y-6">
+        <div
+          v-for="category in currentSection.data"
+          :key="category.category_id"
+          class="rounded-xl shadow-lg p-6 transition-all duration-300"
+          :class="
+            isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white'
+          "
+        >
+          <div class="mb-4">
+            <h4
+              class="text-lg font-semibold transition-colors"
+              :class="isDarkMode ? 'text-white' : 'text-gray-800'"
+            >
+              {{ category.category_name }}
+              <span
+                class="text-sm font-normal transition-colors"
+                :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+              >
+                (Max: {{ category.max_score }}, Weight: {{ category.weight }}%)
+              </span>
+            </h4>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Male Category Results -->
+            <div
+              class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4"
+              :class="isDarkMode ? 'from-blue-900 to-indigo-900' : ''"
+            >
+              <h5
+                class="text-md font-semibold mb-3 flex items-center"
+                :class="isDarkMode ? 'text-blue-200' : 'text-blue-800'"
+              >
+                <i class="fas fa-male mr-2"></i>
+                Male Results ({{ category.males?.length || 0 }})
+              </h5>
+              <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead :class="isDarkMode ? 'bg-blue-800' : 'bg-blue-100'">
+                    <tr>
+                      <th
+                        class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                        :class="isDarkMode ? 'text-blue-200' : 'text-blue-800'"
+                      >
+                        Rank
+                      </th>
+                      <th
+                        class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                        :class="isDarkMode ? 'text-blue-200' : 'text-blue-800'"
+                      >
+                        Candidate
+                      </th>
+                      <th
+                        class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                        :class="isDarkMode ? 'text-blue-200' : 'text-blue-800'"
+                      >
+                        Category Avg
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody
+                    class="divide-y divide-gray-200"
+                    :class="
+                      isDarkMode ? 'bg-blue-900 divide-blue-700' : 'bg-white'
+                    "
+                  >
+                    <tr
+                      v-for="result in category.males || []"
+                      :key="result.candidate_id"
+                      class="hover:bg-blue-50 transition-colors"
+                      :class="isDarkMode ? 'hover:bg-blue-800' : ''"
+                    >
+                      <td class="px-3 py-2 whitespace-nowrap">
+                        <span
+                          class="text-sm font-bold"
+                          :class="isDarkMode ? 'text-white' : 'text-gray-900'"
+                        >
+                          {{ result.rank }}
+                        </span>
+                      </td>
+                      <td class="px-3 py-2 whitespace-nowrap">
+                        <div>
+                          <div
+                            class="text-xs font-medium"
+                            :class="
+                              isDarkMode ? 'text-blue-100' : 'text-gray-900'
+                            "
+                          >
+                            {{ result.first_name }} {{ result.last_name }}
+                          </div>
+                          <div
+                            class="text-xs"
+                            :class="
+                              isDarkMode ? 'text-blue-300' : 'text-gray-500'
+                            "
+                          >
+                            #{{ result.candidate_number }}
+                          </div>
+                        </div>
+                      </td>
+                      <td class="px-3 py-2 whitespace-nowrap">
+                        <span
+                          class="px-2 py-1 rounded-full text-xs font-medium"
+                          :class="
+                            getScoreColorClass(
+                              result.category_average,
+                              category.max_score
+                            )
+                          "
+                        >
+                          {{ Number(result.category_average).toFixed(1) }}/{{
+                            category.max_score
+                          }}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr v-if="!category.males?.length">
+                      <td
+                        colspan="3"
+                        class="px-3 py-4 text-center text-xs"
+                        :class="isDarkMode ? 'text-blue-300' : 'text-gray-500'"
+                      >
+                        No male candidates scored yet.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Female Category Results -->
+            <div
+              class="bg-gradient-to-r from-pink-50 to-rose-50 rounded-lg p-4"
+              :class="isDarkMode ? 'from-pink-900 to-rose-900' : ''"
+            >
+              <h5
+                class="text-md font-semibold mb-3 flex items-center"
+                :class="isDarkMode ? 'text-pink-200' : 'text-pink-800'"
+              >
+                <i class="fas fa-female mr-2"></i>
+                Female Results ({{ category.females?.length || 0 }})
+              </h5>
+              <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead :class="isDarkMode ? 'bg-pink-800' : 'bg-pink-100'">
+                    <tr>
+                      <th
+                        class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                        :class="isDarkMode ? 'text-pink-200' : 'text-pink-800'"
+                      >
+                        Rank
+                      </th>
+                      <th
+                        class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                        :class="isDarkMode ? 'text-pink-200' : 'text-pink-800'"
+                      >
+                        Candidate
+                      </th>
+                      <th
+                        class="px-3 py-2 text-left text-xs font-medium uppercase tracking-wider"
+                        :class="isDarkMode ? 'text-pink-200' : 'text-pink-800'"
+                      >
+                        Category Avg
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody
+                    class="divide-y divide-gray-200"
+                    :class="
+                      isDarkMode ? 'bg-pink-900 divide-pink-700' : 'bg-white'
+                    "
+                  >
+                    <tr
+                      v-for="result in category.females || []"
+                      :key="result.candidate_id"
+                      class="hover:bg-pink-50 transition-colors"
+                      :class="isDarkMode ? 'hover:bg-pink-800' : ''"
+                    >
+                      <td class="px-3 py-2 whitespace-nowrap">
+                        <span
+                          class="text-sm font-bold"
+                          :class="isDarkMode ? 'text-white' : 'text-gray-900'"
+                        >
+                          {{ result.rank }}
+                        </span>
+                      </td>
+                      <td class="px-3 py-2 whitespace-nowrap">
+                        <div>
+                          <div
+                            class="text-xs font-medium"
+                            :class="
+                              isDarkMode ? 'text-pink-100' : 'text-gray-900'
+                            "
+                          >
+                            {{ result.first_name }} {{ result.last_name }}
+                          </div>
+                          <div
+                            class="text-xs"
+                            :class="
+                              isDarkMode ? 'text-pink-300' : 'text-gray-500'
+                            "
+                          >
+                            #{{ result.candidate_number }}
+                          </div>
+                        </div>
+                      </td>
+                      <td class="px-3 py-2 whitespace-nowrap">
+                        <span
+                          class="px-2 py-1 rounded-full text-xs font-medium"
+                          :class="
+                            getScoreColorClass(
+                              result.category_average,
+                              category.max_score
+                            )
+                          "
+                        >
+                          {{ Number(result.category_average).toFixed(1) }}/{{
+                            category.max_score
+                          }}
+                        </span>
+                      </td>
+                    </tr>
+                    <tr v-if="!category.females?.length">
+                      <td
+                        colspan="3"
+                        class="px-3 py-4 text-center text-xs"
+                        :class="isDarkMode ? 'text-pink-300' : 'text-gray-500'"
+                      >
+                        No female candidates scored yet.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stage Results Section -->
+      <div v-else-if="currentSection.type === 'stage'" class="space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <!-- Male Stage Results -->
+          <div
+            class="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6"
+          >
+            <h4
+              class="text-lg font-semibold text-blue-800 mb-4 flex items-center"
+            >
+              <i class="fas fa-male mr-2"></i>
+              Male Candidates ({{ currentSection.data.males?.length || 0 }})
+            </h4>
+
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-blue-100">
+                  <tr>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Rank
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Candidate
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Mean Rating
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-blue-800 uppercase tracking-wider"
+                    >
+                      Mean Rank
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <tr
+                    v-for="result in currentSection.data.males || []"
+                    :key="result.candidate_id"
+                    class="hover:bg-blue-50 transition-colors"
+                  >
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span class="text-lg font-bold text-gray-900">
+                        {{ result.overall_rank || result.rank }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <div>
+                        <div class="text-sm font-medium text-gray-900">
+                          {{ result.candidate.first_name }}
+                          {{ result.candidate.last_name }}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          #{{ result.candidate.candidate_number }} -
+                          {{ result.candidate.team }}
+                        </div>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span
+                        class="px-2 py-1 rounded-full text-xs font-medium"
+                        :class="
+                          getScoreColorClass(
+                            result.mean_rating || result.raw_average
+                          )
+                        "
+                      >
+                        {{
+                          Number(
+                            result.mean_rating || result.raw_average || 0
+                          ).toFixed(1)
+                        }}/{{ eventMaxScore }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span class="text-sm text-gray-900">
+                        {{ Number(result.mean_rank || 0).toFixed(2) }}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr v-if="!currentSection.data.males?.length">
+                    <td
+                      colspan="4"
+                      class="px-4 py-6 text-center text-gray-500 text-sm"
+                    >
+                      No male candidates scored for this stage yet.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Female Stage Results -->
+          <div class="bg-gradient-to-r from-pink-50 to-rose-50 rounded-lg p-6">
+            <h4
+              class="text-lg font-semibold text-pink-800 mb-4 flex items-center"
+            >
+              <i class="fas fa-female mr-2"></i>
+              Female Candidates ({{ currentSection.data.females?.length || 0 }})
+            </h4>
+
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-pink-100">
+                  <tr>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Rank
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Candidate
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Mean Rating
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-pink-800 uppercase tracking-wider"
+                    >
+                      Mean Rank
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <tr
+                    v-for="result in currentSection.data.females || []"
+                    :key="result.candidate_id"
+                    class="hover:bg-pink-50 transition-colors"
+                  >
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span class="text-lg font-bold text-gray-900">
+                        {{ result.overall_rank || result.rank }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <div>
+                        <div class="text-sm font-medium text-gray-900">
+                          {{ result.candidate.first_name }}
+                          {{ result.candidate.last_name }}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          #{{ result.candidate.candidate_number }} -
+                          {{ result.candidate.team }}
+                        </div>
+                      </div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span
+                        class="px-2 py-1 rounded-full text-xs font-medium"
+                        :class="
+                          getScoreColorClass(
+                            result.mean_rating || result.raw_average
+                          )
+                        "
+                      >
+                        {{
+                          Number(
+                            result.mean_rating || result.raw_average || 0
+                          ).toFixed(1)
+                        }}/{{ eventMaxScore }}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                      <span class="text-sm text-gray-900">
+                        {{ Number(result.mean_rank || 0).toFixed(2) }}
+                      </span>
+                    </td>
+                  </tr>
+                  <tr v-if="!currentSection.data.females?.length">
+                    <td
+                      colspan="4"
+                      class="px-4 py-6 text-center text-gray-500 text-sm"
+                    >
+                      No female candidates scored for this stage yet.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -438,37 +1467,75 @@ onUnmounted(() => {
 
     <!-- No Results Message -->
     <div
-      v-if="
-        !finalResults.length &&
-        Object.values(partialResultsByStage).every((results) => !results.length)
-      "
-      class="text-center py-10"
+      v-else-if="!loading && allSections.length === 0"
+      class="text-center py-16 rounded-xl transition-all duration-300"
+      :class="isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-gray-50'"
     >
-      <p class="text-gray-500">No results available yet.</p>
+      <i
+        class="fas fa-chart-line text-4xl mb-4 transition-colors"
+        :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'"
+      ></i>
+      <p
+        class="text-lg transition-colors"
+        :class="isDarkMode ? 'text-gray-300' : 'text-gray-500'"
+      >
+        No results available yet.
+      </p>
+      <p
+        class="text-sm transition-colors"
+        :class="isDarkMode ? 'text-gray-400' : 'text-gray-400'"
+      >
+        Results will appear once scoring begins.
+      </p>
     </div>
 
     <!-- PDF Preview Modal -->
     <div
       v-if="showPreview"
-      class="fixed inset-0 z-50 bg-black bg-opacity-50 backdrop-blur-md flex items-center justify-center p-6"
+      class="fixed inset-0 z-50 flex items-center justify-center p-4 transition-all duration-300"
+      :class="isDarkMode ? 'bg-black/80' : 'bg-black/75'"
     >
       <div
-        class="bg-white rounded-lg shadow-xl w-full max-w-5xl h-[85vh] relative p-6 animate-in fade-in-0 zoom-in-95"
+        class="w-full max-w-7xl h-[95vh] relative overflow-hidden rounded-2xl shadow-2xl transition-all duration-300"
+        :class="isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white'"
       >
-        <div class="flex justify-between items-center mb-4">
-          <h3 class="text-xl font-semibold text-gray-800">Results Preview</h3>
+        <div
+          class="flex justify-between items-center p-6 border-b transition-colors"
+          :class="
+            isDarkMode
+              ? 'bg-gray-700 border-gray-600'
+              : 'bg-gray-50 border-gray-200'
+          "
+        >
+          <div>
+            <h3
+              class="text-2xl font-bold transition-colors"
+              :class="isDarkMode ? 'text-white' : 'text-gray-800'"
+            >
+              Results Preview
+            </h3>
+          </div>
           <button
             @click="closePreview"
-            class="text-gray-500 hover:text-gray-700 hover:bg-gray-100 w-8 h-8 flex items-center justify-center rounded-full"
+            class="w-10 h-10 flex items-center justify-center rounded-full transition-all duration-200"
+            :class="
+              isDarkMode
+                ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-600'
+                : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+            "
           >
-            <i class="fas fa-times"></i>
+            <i class="fas fa-times text-lg"></i>
           </button>
         </div>
-        <iframe
-          :src="previewUrl"
-          class="w-full h-full border-0 rounded-md"
-          title="PDF Preview"
-        ></iframe>
+
+        <div class="h-[calc(95vh-88px)] p-4">
+          <iframe
+            :src="previewUrl"
+            class="w-full h-full border-0 rounded-lg shadow-inner"
+            title="PDF Preview"
+          >
+          </iframe>
+        </div>
       </div>
     </div>
   </div>

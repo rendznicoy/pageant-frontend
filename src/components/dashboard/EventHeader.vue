@@ -23,7 +23,7 @@ const refreshDashboard = async () => {
     <div class="flex justify-center items-center py-6 h-24 relative">
       <div class="relative">
         <img
-          src="/PSV.png"
+          src="/logoFI.png"
           alt="PSV Logo"
           class="h-30 mt-8 hover:opacity-90 cursor-pointer"
           @click="refreshDashboard"
