@@ -7,8 +7,6 @@ import { useToast } from "vue-toastification";
 import FlatPickr from "vue-flatpickr-component";
 import "flatpickr/dist/flatpickr.css";
 import axiosClient from "@/axios";
-import Navbar from "@/components/layout/Navbar.vue";
-import Sidebar from "@/components/layout/Sidebar.vue";
 import Breadcrumbs from "@/components/layout/Breadcrumbs.vue";
 import Multiselect from "vue-multiselect";
 import "vue-multiselect/dist/vue-multiselect.min.css";
@@ -96,6 +94,20 @@ const createEvent = async () => {
     return;
   }
 
+  // Show loading toast
+  const loadingToastId = toast.info("Creating event...", {
+    timeout: false,
+    closeOnClick: false,
+    pauseOnFocusLoss: false,
+    pauseOnHover: false,
+    draggable: false,
+    showCloseButtonOnHover: false,
+    hideProgressBar: false,
+    closeButton: false,
+    icon: "fas fa-spinner fa-spin",
+    position: "top-right",
+  });
+
   try {
     const formData = new FormData();
     formData.append("event_name", eventData.value.event_name);
@@ -138,10 +150,19 @@ const createEvent = async () => {
       headers: { "Content-Type": "multipart/form-data" },
     });
 
-    toast.success("Event created successfully!", { timeout: 3000 });
+    toast.dismiss(loadingToastId);
+
+    toast.success(`"${eventData.value.event_name}" created successfully!`, {
+      timeout: 4000,
+      position: "top-right",
+      icon: "fas fa-check-circle",
+    });
+
     await eventStore.fetchEvents(true);
     router.push("/admin/dashboard");
   } catch (error) {
+    // Dismiss loading toast
+    toast.dismiss(loadingToastId);
     handleCreateError(error);
   } finally {
     isSubmitting.value = false;
@@ -206,6 +227,26 @@ const validateEventData = () => {
     isValid = false;
   }
 
+  if (!eventData.value.event_name?.trim()) {
+    errors.value.event_name = ["Event name is required"];
+    toast.error("Event name is required", {
+      timeout: 4000,
+      position: "top-right",
+      icon: "fas fa-exclamation-triangle",
+    });
+    isValid = false;
+  }
+
+  if (!eventData.value.venue?.trim()) {
+    errors.value.venue = ["Venue is required"];
+    toast.error("Venue is required", {
+      timeout: 4000,
+      position: "top-right",
+      icon: "fas fa-map-marker-alt",
+    });
+    isValid = false;
+  }
+
   return isValid;
 };
 
@@ -252,13 +293,8 @@ const addManualStatistician = () => {
 
 <template>
   <div class="min-h-screen bg-gray-100">
-    <Navbar />
-    <Sidebar />
     <Breadcrumbs
-      :items="[
-        { label: 'Dashboard', to: '/admin/dashboard' },
-        { label: 'Create Event' },
-      ]"
+      :items="[{ label: 'Home', to: 'auto' }, { label: 'Create Event' }]"
     />
 
     <div class="p-6 max-w-lg mx-auto">
@@ -492,7 +528,7 @@ const addManualStatistician = () => {
             <button
               type="button"
               @click="clearPhoto"
-              class="absolute top-0 right-0 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-700 focus:outline-none"
+              class="absolute bottom-0 right-0 bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center hover:bg-red-700 focus:outline-none"
               title="Remove photo"
               aria-label="Remove selected cover photo"
             >

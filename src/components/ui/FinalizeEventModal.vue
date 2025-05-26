@@ -37,37 +37,37 @@ const emit = defineEmits(["close", "confirm"]);
       <div class="p-6">
         <div class="flex items-center mb-4">
           <div
-            class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-yellow-100 sm:mx-0 sm:h-10 sm:w-10"
+            class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-purple-100 sm:mx-0 sm:h-10 sm:w-10"
           >
-            <i class="fas fa-exclamation-triangle text-yellow-600"></i>
+            <i class="fas fa-check-circle text-purple-600"></i>
           </div>
           <div class="ml-4">
             <h3
               class="text-lg font-medium transition-colors"
               :class="isDarkMode ? 'text-white' : 'text-gray-900'"
             >
-              Reset Event
+              Finalize Event
             </h3>
           </div>
         </div>
         <p
-          class="mb-4 transition-colors"
+          class="mb-6 transition-colors"
           :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
         >
-          Are you sure you want to reset this event? This will set the event
-          status to inactive and <strong>permanently remove all scores</strong>.
+          Are you sure you want to finalize this event? This will disable most
+          functionalities and lock the scores. This action cannot be undone.
         </p>
         <div
           class="text-sm border rounded-lg px-4 py-3 mb-6 transition-colors"
           :class="
             isDarkMode
-              ? 'bg-red-900/20 border-red-500 text-red-200'
-              : 'bg-red-50 border-red-400 text-red-700'
+              ? 'bg-purple-900/20 border-purple-500 text-purple-200'
+              : 'bg-purple-50 border-purple-400 text-purple-700'
           "
         >
-          <i class="fas fa-exclamation-triangle mr-2"></i>
-          <strong>Warning:</strong> This action will permanently delete all
-          scoring data and cannot be undone. All judges' scores will be lost.
+          <i class="fas fa-info-circle mr-2"></i>
+          Once finalized, you will not be able to modify judges, candidates, or
+          scores.
         </div>
         <div class="flex justify-end space-x-3">
           <button
@@ -84,11 +84,11 @@ const emit = defineEmits(["close", "confirm"]);
           <button
             @click="emit('confirm')"
             :disabled="loading"
-            class="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            class="px-4 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <i v-if="loading" class="fas fa-spinner fa-spin"></i>
-            <i v-else class="fas fa-undo"></i>
-            {{ loading ? "Resetting..." : "Reset Event" }}
+            <i v-else class="fas fa-check-circle"></i>
+            {{ loading ? "Finalizing..." : "Finalize Event" }}
           </button>
         </div>
       </div>

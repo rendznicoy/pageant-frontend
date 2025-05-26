@@ -199,8 +199,8 @@ watch([() => data.value.username, () => data.value.password], () => {
       <div class="flex justify-center">
         <a href="/">
           <img
-            class="h-20 w-auto"
-            src="/PSV.png"
+            class="h-20 mb-8 w-auto"
+            src="/logoFI.png"
             alt="Visayas State University Logo"
           />
         </a>

@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted, watch } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import { useToast } from "vue-toastification";
-import axiosClient from "@/axios"; // Assuming you have an axios client setup
+import axiosClient from "@/axios";
 
 const props = defineProps({
   eventId: {
@@ -10,6 +10,43 @@ const props = defineProps({
   },
 });
 
+// Dark mode state
+const isDarkMode = ref(false);
+
+// Initialize dark mode from localStorage
+onMounted(() => {
+  const savedDarkMode = localStorage.getItem("darkMode");
+  if (savedDarkMode !== null) {
+    isDarkMode.value = savedDarkMode === "true";
+  } else {
+    isDarkMode.value = window.matchMedia(
+      "(prefers-color-scheme: dark)"
+    ).matches;
+  }
+});
+
+const stageForm = ref({
+  stage_name: "",
+});
+
+const categoryForm = ref({
+  category_name: "",
+  category_weight: "",
+  max_score: 100,
+});
+
+const maxScoreForm = ref({
+  global_max_score: 100,
+});
+
+const clearForms = () => {
+  stageForm.value.stage_name = "";
+  categoryForm.value.category_name = "";
+  categoryForm.value.category_weight = "";
+  categoryForm.value.max_score = globalMaxScore.value;
+  maxScoreForm.value.global_max_score = globalMaxScore.value;
+};
+
 const toast = useToast();
 const stages = ref([]);
 const loading = ref(false);
@@ -17,6 +54,7 @@ const showCreateStageModal = ref(false);
 const showEditStageModal = ref(false);
 const showCreateCategoryModal = ref(false);
 const showEditCategoryModal = ref(false);
+const showEditMaxScoreModal = ref(false);
 const selectedStage = ref(null);
 const selectedCategory = ref(null);
 const currentStageId = ref(null);
@@ -24,20 +62,237 @@ const showDeleteStageModal = ref(false);
 const showDeleteCategoryModal = ref(false);
 const stageToDelete = ref(null);
 const categoryToDelete = ref(null);
+const eventStatus = ref("inactive");
+const globalMaxScore = ref(100);
+
+// Enhanced watch for selectedCategory changes
+watch(
+  () => selectedCategory.value,
+  (newCategory) => {
+    if (newCategory) {
+      categoryForm.value = {
+        category_name: newCategory.category_name || newCategory.name,
+        category_weight: newCategory.category_weight || newCategory.weight,
+        max_score: newCategory.max_score || globalMaxScore.value,
+      };
+    }
+  },
+  { deep: true }
+);
+
+// Watch for global max score changes to update category form
+watch(
+  () => globalMaxScore.value,
+  (newMaxScore) => {
+    categoryForm.value.max_score = newMaxScore;
+  },
+  { immediate: true }
+);
+
+const createStage = async (formData) => {
+  if (isEventLocked.value) {
+    toast.error("Cannot create stages when event is active or completed.");
+    return;
+  }
+
+  loading.value = true;
+  try {
+    await axiosClient.post(
+      `/api/v1/events/${props.eventId}/stages/create`,
+      formData
+    );
+    toast.success("Stage created successfully!");
+    showCreateStageModal.value = false;
+    clearForms();
+    await fetchStages();
+  } catch (error) {
+    toast.error(error.response?.data?.message || "Failed to create stage.");
+  } finally {
+    loading.value = false;
+  }
+};
+
+const updateStage = async (formData) => {
+  if (isEventLocked.value) {
+    toast.error("Cannot update stages when event is active or completed.");
+    return;
+  }
+
+  loading.value = true;
+  try {
+    await axiosClient.post(
+      `/api/v1/events/${props.eventId}/stages/${selectedStage.value.id}/edit`,
+      formData
+    );
+    toast.success("Stage updated successfully!");
+    showEditStageModal.value = false;
+    clearForms();
+    await fetchStages();
+  } catch (error) {
+    toast.error(error.response?.data?.message || "Failed to update stage.");
+  } finally {
+    loading.value = false;
+  }
+};
+
+const deleteStage = async (stage) => {
+  if (isEventLocked.value) {
+    toast.error("Cannot delete stages when event is active or completed.");
+    return;
+  }
+
+  loading.value = true;
+  try {
+    // Send as form data for DELETE request validation
+    const formData = new FormData();
+    formData.append("stage_id", stage.id);
+    formData.append("event_id", props.eventId);
+    formData.append("_method", "DELETE");
+
+    await axiosClient.post(
+      `/api/v1/events/${props.eventId}/stages/${stage.id}`,
+      formData
+    );
+    toast.success("Stage deleted successfully!");
+    await fetchStages();
+  } catch (error) {
+    toast.error(error.response?.data?.message || "Failed to delete stage.");
+  } finally {
+    loading.value = false;
+  }
+};
+
+const deleteCategory = async (category) => {
+  if (isEventLocked.value) {
+    toast.error("Cannot delete categories when event is active or completed.");
+    return;
+  }
+
+  loading.value = true;
+  try {
+    // Send stage_id as query parameter since it's required by validation
+    await axiosClient.delete(
+      `/api/v1/events/${props.eventId}/categories/${category.id}?stage_id=${category.stage_id}`
+    );
+    toast.success("Category deleted successfully!");
+    await fetchStages();
+  } catch (error) {
+    toast.error(error.response?.data?.message || "Failed to delete category.");
+  } finally {
+    loading.value = false;
+  }
+};
+
+const openEditStageModal = (stage) => {
+  if (isEventLocked.value) {
+    toast.warning("Cannot edit stages when event is active or completed.");
+    return;
+  }
+  selectedStage.value = stage;
+  stageForm.value.stage_name = stage.name;
+  showEditStageModal.value = true;
+};
+
+const openEditMaxScoreModal = () => {
+  if (isEventLocked.value) {
+    toast.warning("Cannot edit max score when event is active or completed.");
+    return;
+  }
+  maxScoreForm.value.global_max_score = globalMaxScore.value;
+  showEditMaxScoreModal.value = true;
+};
+
+// Single computed property for checking if event is locked
+const isEventLocked = computed(() => {
+  return ["active", "completed"].includes(eventStatus.value);
+});
+
+// Enhanced method to handle max score input changes
+const handleMaxScoreChange = (event) => {
+  const value = parseInt(event.target.value) || globalMaxScore.value;
+  categoryForm.value.max_score = Math.max(1, Math.min(100, value));
+};
+
+const handleDeleteStage = async () => {
+  if (stageToDelete.value && stageToDelete.value.id) {
+    await deleteStage(stageToDelete.value); // Pass full object instead of just ID
+    showDeleteStageModal.value = false;
+    stageToDelete.value = null;
+  }
+};
+
+const handleDeleteCategory = async () => {
+  if (categoryToDelete.value && categoryToDelete.value.id) {
+    await deleteCategory(categoryToDelete.value); // Pass full object instead of just ID
+    showDeleteCategoryModal.value = false;
+    categoryToDelete.value = null;
+  }
+};
+
+// Function to validate category weight
+const validateCategoryWeight = (
+  newWeight,
+  stageId,
+  excludeCategoryId = null
+) => {
+  const stage = stages.value.find((s) => s.id === stageId);
+  if (!stage) return { isValid: false, message: "Stage not found" };
+
+  const currentTotal = stage.categories
+    .filter((cat) => cat.id !== excludeCategoryId)
+    .reduce((sum, cat) => sum + (cat.weight || 0), 0);
+
+  const newTotal = currentTotal + newWeight;
+
+  if (newTotal > 100) {
+    return {
+      isValid: false,
+      message: `Category weight total exceeds limit of 100. Current total: ${currentTotal}, trying to add: ${newWeight}, would result in: ${newTotal}`,
+    };
+  }
+
+  return { isValid: true, newTotal };
+};
+
+const fetchEventDetails = async () => {
+  try {
+    const eventData = await axiosClient.get(`/api/v1/events/${props.eventId}`);
+    const data = eventData.data || eventData;
+    eventStatus.value = data.status || "inactive";
+    globalMaxScore.value = data.global_max_score || 100;
+  } catch (error) {
+    console.error("Error fetching event details:", error);
+    toast.error("Failed to fetch event details");
+  }
+};
 
 const fetchStages = async () => {
   loading.value = true;
   try {
-    const response = await axiosClient.get(
+    const stagesData = await axiosClient.get(
       `/api/v1/events/${props.eventId}/stages`
     );
-    stages.value = Array.isArray(response.data)
-      ? response.data
-      : response.data.data || [];
-    console.log("Stages:", stages.value); // Debug log
-    console.log("Calling /stages with eventId:", props.eventId);
+
+    stages.value = Array.isArray(stagesData)
+      ? stagesData
+      : Array.isArray(stagesData?.data)
+      ? stagesData.data
+      : [];
+
+    stages.value.forEach((stage) => {
+      stage.totalWeight =
+        stage.categories?.reduce((sum, cat) => sum + (cat.weight || 0), 0) || 0;
+
+      if (stage.categories) {
+        stage.categories.forEach((category) => {
+          if (!category.max_score) {
+            category.max_score = globalMaxScore.value;
+          }
+        });
+      }
+    });
   } catch (error) {
-    console.error("Error fetching stages:", error); // this logs full Axios error
+    console.error("Error fetching stages:", error);
     const message =
       error.response?.data?.message ||
       error.message ||
@@ -48,72 +303,62 @@ const fetchStages = async () => {
   }
 };
 
-const createStage = async (formData) => {
-  loading.value = true;
-  try {
-    await axiosClient.post(
-      `/api/v1/events/${props.eventId}/stages/create`,
-      formData
-    );
-    toast.success("Stage created successfully!");
-    showCreateStageModal.value = false;
-    await fetchStages();
-  } catch (error) {
-    toast.error(error.response?.data?.message || "Failed to create stage.");
-  } finally {
-    loading.value = false;
+const updateGlobalMaxScore = async (newMaxScore) => {
+  if (isEventLocked.value) {
+    toast.error("Cannot update max score when event is active or completed.");
+    return;
   }
-};
 
-const updateStage = async (formData) => {
   loading.value = true;
   try {
     await axiosClient.patch(
-      `/api/v1/events/${props.eventId}/stages/${selectedStage.value.id}/edit`,
-      formData
-    );
-    toast.success("Stage updated successfully!");
-    showEditStageModal.value = false;
-    await fetchStages();
-  } catch (error) {
-    toast.error(error.response?.data?.message || "Failed to update stage.");
-  } finally {
-    loading.value = false;
-  }
-};
-
-const deleteStage = async (stageId) => {
-  loading.value = true;
-  try {
-    const formData = new FormData();
-    formData.append("_method", "DELETE");
-    formData.append("event_id", props.eventId); // REQUIRED for DestroyStageRequest
-    formData.append("stage_id", stageId); // REQUIRED for DestroyStageRequest
-
-    await axiosClient.post(
-      `/api/v1/events/${props.eventId}/stages/${stageId}`,
-      formData
+      `/api/v1/events/${props.eventId}/global-max-score`,
+      {
+        global_max_score: newMaxScore,
+      }
     );
 
-    toast.success("Stage deleted successfully!");
+    globalMaxScore.value = newMaxScore;
+    toast.success("Global max score updated successfully!");
+    showEditMaxScoreModal.value = false;
+    clearForms();
     await fetchStages();
   } catch (error) {
-    console.error("Delete stage failed:", error.response?.data);
-    toast.error(error.response?.data?.message || "Failed to delete stage.");
+    toast.error(
+      error.response?.data?.message || "Failed to update global max score."
+    );
   } finally {
     loading.value = false;
   }
 };
 
 const createCategory = async (formData) => {
+  if (isEventLocked.value) {
+    toast.error("Cannot create categories when event is active or completed.");
+    return;
+  }
+
+  const weight = parseInt(formData.get("category_weight"));
+  const stageId = parseInt(formData.get("stage_id"));
+
+  const validation = validateCategoryWeight(weight, stageId);
+  if (!validation.isValid) {
+    toast.error(validation.message);
+    return;
+  }
+
   loading.value = true;
   try {
+    formData.delete("max_score");
+    formData.set("max_score", globalMaxScore.value);
+
     await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/create`,
       formData
     );
     toast.success("Category created successfully!");
     showCreateCategoryModal.value = false;
+    clearForms();
     await fetchStages();
   } catch (error) {
     toast.error(error.response?.data?.message || "Failed to create category.");
@@ -123,82 +368,84 @@ const createCategory = async (formData) => {
 };
 
 const updateCategory = async (formData) => {
+  if (isEventLocked.value) {
+    toast.error("Cannot update categories when event is active or completed.");
+    return;
+  }
+
+  const weight = parseInt(formData.get("category_weight"));
+  const categoryId = parseInt(formData.get("category_id"));
+  const stageId = parseInt(formData.get("stage_id"));
+
+  const validation = validateCategoryWeight(weight, stageId, categoryId);
+  if (!validation.isValid) {
+    toast.error(validation.message);
+    return;
+  }
+
   loading.value = true;
   try {
-    await axiosClient.patch(
+    const maxScore =
+      parseInt(formData.get("max_score")) || globalMaxScore.value;
+    formData.delete("max_score");
+    formData.set("max_score", maxScore);
+
+    await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${selectedCategory.value.id}/edit`,
       formData
     );
     toast.success("Category updated successfully!");
     showEditCategoryModal.value = false;
+    clearForms();
     await fetchStages();
   } catch (error) {
-    console.error("Validation Errors:", error.response?.data?.errors);
     toast.error(error.response?.data?.message || "Failed to update category.");
   } finally {
     loading.value = false;
   }
 };
 
-const deleteCategory = async (categoryId) => {
-  loading.value = true;
-  try {
-    const formData = new FormData();
-    formData.append("_method", "DELETE");
-    formData.append("event_id", props.eventId);
-    formData.append("category_id", categoryId);
-
-    // Find the stage_id by locating the stage containing this category
-    const stage = stages.value.find((s) =>
-      s.categories.some((c) => c.id === categoryId)
-    );
-    const matchedCategory = stage?.categories.find((c) => c.id === categoryId);
-
-    if (!stage || !matchedCategory) {
-      throw new Error("Could not resolve stage_id for category.");
-    }
-
-    formData.append("stage_id", stage.id);
-
-    await axiosClient.post(
-      `/api/v1/events/${props.eventId}/categories/${categoryId}`,
-      formData
-    );
-
-    toast.success("Category deleted successfully!");
-    await fetchStages();
-  } catch (error) {
-    console.error(
-      "Delete stage failed:",
-      error.response?.data || error.message
-    );
-    toast.error(error.response?.data?.message || "Failed to delete category.");
-  } finally {
-    loading.value = false;
-  }
-};
-
-const openEditStageModal = (stage) => {
-  selectedStage.value = { ...stage };
-  showEditStageModal.value = true;
-};
-
-const openCreateCategoryModal = (stageId) => {
-  currentStageId.value = stageId;
-  showCreateCategoryModal.value = true;
-};
-
 const openEditCategoryModal = (category) => {
+  if (isEventLocked.value) {
+    toast.warning("Cannot edit categories when event is active or completed.");
+    return;
+  }
+
   selectedCategory.value = {
-    id: category.id, // required for endpoint URL
+    id: category.id,
     category_id: category.id,
     event_id: category.event_id,
     stage_id: category.stage_id,
     category_name: category.name,
     category_weight: category.weight,
-    max_score: category.max_score,
+    max_score: category.max_score || globalMaxScore.value,
   };
+
+  categoryForm.value.category_name = category.name;
+  categoryForm.value.category_weight = category.weight;
+  categoryForm.value.max_score = category.max_score || globalMaxScore.value;
+
   showEditCategoryModal.value = true;
+};
+
+const confirmDeleteStage = (stage) => {
+  if (isEventLocked.value) {
+    toast.warning("Cannot delete stages when event is active or completed.");
+    return;
+  }
+  stageToDelete.value = stage;
+  showDeleteStageModal.value = true;
+};
+
+const confirmDeleteCategory = (category) => {
+  if (isEventLocked.value) {
+    toast.warning(
+      "Cannot delete categories when event is active or completed."
+    );
+    return;
+  }
+  categoryToDelete.value = category;
+  showDeleteCategoryModal.value = true;
 };
 
 const handleCreateStage = (e) => {
@@ -210,243 +457,740 @@ const handleCreateStage = (e) => {
 const handleUpdateStage = async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
-
   formData.set("event_id", props.eventId);
-  formData.set("stage_id", selectedStage.value.id); // or selectedStage.value.stage_id
-  formData.set("_method", "PATCH"); // Laravel expects this for form-based PATCH
-
-  for (let [key, val] of formData.entries()) {
-    console.log(key, val);
-  }
-
-  try {
-    await axiosClient.post(
-      `/api/v1/events/${props.eventId}/stages/${selectedStage.value.id}/edit`,
-      formData
-    );
-    toast.success("Stage updated successfully!");
-    showEditStageModal.value = false;
-    await fetchStages();
-  } catch (error) {
-    console.error("Stage update error:", error.response?.data);
-    toast.error(error.response?.data?.message || "Failed to update stage.");
-  }
+  formData.set("stage_id", selectedStage.value.id);
+  formData.set("_method", "PATCH");
+  await updateStage(formData);
 };
 
 const handleCreateCategory = (e) => {
   const formData = new FormData(e.target);
   formData.set("event_id", props.eventId);
   formData.set("stage_id", currentStageId.value);
+  formData.set("max_score", globalMaxScore.value);
   createCategory(formData);
 };
 
 const handleUpdateCategory = async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
-
   formData.set("event_id", props.eventId);
   formData.set("category_id", selectedCategory.value.category_id);
   formData.set("stage_id", selectedCategory.value.stage_id);
+  formData.set("max_score", globalMaxScore.value); // Use global max score instead
   formData.set("_method", "PATCH");
+  await updateCategory(formData);
+};
 
-  for (let [key, val] of formData.entries()) {
-    console.log(key, val);
-  }
+const handleUpdateGlobalMaxScore = (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const newMaxScore = parseInt(formData.get("global_max_score"));
+  updateGlobalMaxScore(newMaxScore);
+};
 
-  try {
-    await axiosClient.post(
-      `/api/v1/events/${props.eventId}/categories/${selectedCategory.value.id}/edit`,
-      formData
+const openCreateCategoryModal = (stageId) => {
+  if (isEventLocked.value) {
+    toast.warning(
+      "Cannot create categories when event is active or completed."
     );
-    toast.success("Category updated successfully!");
-    showEditCategoryModal.value = false;
-    await fetchStages();
-  } catch (error) {
-    console.error("Category update error:", error.response?.data);
-    toast.error(error.response?.data?.message || "Failed to update category.");
-  } finally {
-    loading.value = false;
+    return;
   }
+  currentStageId.value = stageId;
+  showCreateCategoryModal.value = true;
 };
 
-const confirmDeleteStage = (stage) => {
-  stageToDelete.value = stage;
-  showDeleteStageModal.value = true;
-};
-
-const confirmDeleteCategory = (category) => {
-  categoryToDelete.value = category;
-  showDeleteCategoryModal.value = true;
-};
-
-onMounted(() => {
-  fetchStages();
-  console.log("Event ID:", props.eventId);
-});
-
-watch([stageToDelete, showDeleteStageModal], () => {
-  console.log("Modal trigger changed:", {
-    stageToDelete: stageToDelete.value,
-    showDeleteStageModal: showDeleteStageModal.value,
-  });
+onMounted(async () => {
+  await fetchEventDetails();
+  await fetchStages();
 });
 </script>
 
 <template>
-  <div class="space-y-6">
-    <div class="flex justify-between items-center">
-      <div class="flex items-center space-x-2">
-        <i class="fas fa-layer-group text-green-600 text-2xl mb-1"></i>
-        <h2 class="text-2xl font-semibold text-green-800">
-          Stages & Categories
-        </h2>
-      </div>
-      <button
-        @click="showCreateStageModal = true"
-        class="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition"
+  <div
+    :class="
+      isDarkMode
+        ? 'bg-gray-900 text-white min-h-screen'
+        : 'bg-gray-50 text-gray-900 min-h-screen'
+    "
+    class="space-y-6 p-6 transition-colors duration-300"
+  >
+    <!-- Header -->
+    <div
+      class="rounded-xl shadow-lg p-6 transition-all duration-300"
+      :class="
+        isDarkMode
+          ? 'bg-gray-800 border border-gray-700'
+          : 'bg-gradient-to-r from-green-50 to-emerald-50'
+      "
+    >
+      <div
+        class="flex flex-col lg:flex-row lg:justify-between lg:items-center space-y-4 lg:space-y-0"
       >
-        <i class="fas fa-plus mr-2"></i>
-        Add Stage
-      </button>
+        <div class="flex items-center space-x-4">
+          <div class="flex items-center space-x-3">
+            <div class="bg-green-500 p-3 rounded-full">
+              <i class="fas fa-layer-group text-white text-2xl"></i>
+            </div>
+            <div>
+              <h2
+                class="text-2xl lg:text-3xl font-bold transition-colors"
+                :class="isDarkMode ? 'text-white' : 'text-green-900'"
+              >
+                Stages & Categories
+              </h2>
+              <p
+                class="text-sm transition-colors"
+                :class="isDarkMode ? 'text-gray-300' : 'text-green-700'"
+              >
+                Organize your event structure and scoring criteria
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="flex flex-col sm:flex-row items-start sm:items-center gap-3"
+        >
+          <!-- Global Max Score Display -->
+          <div
+            :class="
+              isDarkMode
+                ? 'bg-blue-900/50 border-blue-700'
+                : 'bg-white/60 border-blue-200'
+            "
+            class="flex items-center space-x-2 px-4 py-2 rounded-lg shadow-sm border backdrop-blur-sm"
+          >
+            <div
+              :class="
+                isDarkMode
+                  ? 'bg-blue-700 text-blue-300'
+                  : 'bg-blue-100 text-blue-600'
+              "
+              class="p-1 rounded-full"
+            >
+              <i class="fas fa-star text-sm"></i>
+            </div>
+            <div>
+              <span
+                :class="isDarkMode ? 'text-blue-300' : 'text-blue-700'"
+                class="text-xs font-medium block"
+              >
+                Max Score
+              </span>
+              <span
+                :class="isDarkMode ? 'text-blue-200' : 'text-blue-800'"
+                class="text-lg font-bold"
+              >
+                {{ globalMaxScore }}
+              </span>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <!-- Edit Max Score Button -->
+            <div class="relative group">
+              <button
+                @click="openEditMaxScoreModal"
+                :disabled="isEventLocked"
+                class="flex items-center px-3 py-2 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg text-sm"
+                :class="
+                  isEventLocked
+                    ? isDarkMode
+                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : isDarkMode
+                    ? 'bg-blue-700 hover:bg-blue-600 text-blue-100'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
+                "
+              >
+                <i class="fas fa-edit mr-2"></i>
+                Edit Max Score
+              </button>
+              <div
+                v-if="isEventLocked"
+                class="absolute -bottom-12 left-1/2 transform -translate-x-1/2 bg-red-600 text-white text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10"
+              >
+                🔒 Disabled: Event is {{ eventStatus }}
+                <div
+                  class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-full border-4 border-transparent border-b-red-600"
+                ></div>
+              </div>
+            </div>
+
+            <!-- Add Stage Button -->
+            <div class="relative group">
+              <button
+                @click="showCreateStageModal = true"
+                :disabled="isEventLocked"
+                class="flex items-center px-4 py-2 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+                :class="
+                  isEventLocked
+                    ? isDarkMode
+                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : isDarkMode
+                    ? 'bg-green-700 hover:bg-green-600 text-green-100'
+                    : 'bg-green-600 text-white hover:bg-green-700'
+                "
+              >
+                <i class="fas fa-plus mr-2"></i>
+                Add Stage
+              </button>
+              <div
+                v-if="isEventLocked"
+                class="absolute -bottom-12 left-1/2 transform -translate-x-1/2 bg-red-600 text-white text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10"
+              >
+                🔒 Disabled: Event is {{ eventStatus }}
+                <div
+                  class="absolute top-0 left-1/2 transform -translate-x-1/2 -translate-y-full border-4 border-transparent border-b-red-600"
+                ></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
-    <div v-if="loading" class="flex justify-center py-12">
-      <i class="fas fa-spinner fa-spin text-3xl text-green-600"></i>
+    <!-- Event Status Warning -->
+    <div
+      v-if="isEventLocked"
+      :class="
+        isDarkMode
+          ? 'bg-gradient-to-r from-red-900/20 to-red-800/20 border-red-500'
+          : 'bg-gradient-to-r from-red-50 to-red-100 border-red-400'
+      "
+      class="border-l-4 p-4 rounded-r-lg shadow-sm"
+    >
+      <div class="flex items-start">
+        <div
+          :class="
+            isDarkMode ? 'bg-red-800 text-red-400' : 'bg-red-100 text-red-600'
+          "
+          class="p-2 rounded-full mr-3 mt-1"
+        >
+          <i class="fas fa-lock"></i>
+        </div>
+        <div>
+          <h3
+            :class="isDarkMode ? 'text-red-300' : 'text-red-800'"
+            class="text-sm font-bold"
+          >
+            🔒 Management Locked - Event is {{ eventStatus.toUpperCase() }}
+          </h3>
+          <p
+            :class="isDarkMode ? 'text-red-400' : 'text-red-700'"
+            class="text-xs mt-2 leading-relaxed"
+          >
+            All stage and category management functions are disabled while the
+            event is {{ eventStatus }}. To make changes, please reset the event
+            to inactive status first.
+          </p>
+        </div>
+      </div>
     </div>
-    <div v-else-if="stages.length" class="space-y-4">
+
+    <!-- Loading State -->
+    <div v-if="loading" class="flex flex-col items-center justify-center py-16">
+      <div class="relative">
+        <div
+          :class="
+            isDarkMode
+              ? 'border-green-800 border-t-green-400'
+              : 'border-green-200 border-t-green-600'
+          "
+          class="w-16 h-16 border-4 rounded-full animate-spin"
+        ></div>
+        <div class="absolute inset-0 flex items-center justify-center">
+          <i
+            :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+            class="fas fa-layer-group text-lg"
+          ></i>
+        </div>
+      </div>
+      <p
+        :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+        class="mt-4 font-medium"
+      >
+        Loading categories...
+      </p>
+    </div>
+
+    <!-- Stages List -->
+    <div v-else-if="stages.length" class="space-y-6">
       <div
         v-for="stage in stages"
         :key="stage.id"
-        class="bg-white rounded-lg shadow overflow-hidden"
+        :class="[
+          isEventLocked ? 'opacity-75' : '',
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700 hover:shadow-2xl'
+            : 'bg-white border-gray-200 hover:shadow-xl',
+        ]"
+        class="rounded-2xl shadow-lg transition-all duration-300 overflow-hidden border"
       >
-        <div class="flex justify-between items-center px-6 py-4 bg-gray-50">
-          <h3 class="text-lg font-medium text-gray-900">{{ stage.name }}</h3>
-          <div class="flex flex-wrap gap-2">
-            <button
-              @click="openEditStageModal(stage)"
-              class="flex items-center gap-1 border border-indigo-200 text-indigo-600 hover:text-white hover:bg-indigo-600 px-3 py-1 rounded-md text-xs font-medium transition"
-            >
-              <i class="fas fa-edit"></i>
-              Edit
-            </button>
-            <button
-              @click="confirmDeleteStage(stage)"
-              class="flex items-center gap-1 border border-red-200 text-red-600 hover:text-white hover:bg-red-600 px-3 py-1 rounded-md text-xs font-medium transition"
-            >
-              <i class="fas fa-trash"></i>
-              Delete
-            </button>
-            <button
-              @click="openCreateCategoryModal(stage.id)"
-              class="flex items-center gap-1 border border-green-200 text-green-600 hover:text-white hover:bg-green-600 px-3 py-1 rounded-md text-xs font-medium transition"
-            >
-              <i class="fas fa-plus"></i>
-              Add Category
-            </button>
+        <!-- Stage Header -->
+        <div
+          :class="
+            isDarkMode
+              ? 'bg-gradient-to-r from-gray-700 to-gray-800 border-gray-600'
+              : 'bg-gradient-to-r from-gray-50 to-gray-100 border-gray-200'
+          "
+          class="px-6 py-5 border-b"
+        >
+          <div class="flex justify-between items-start">
+            <div class="flex-1">
+              <div class="flex items-center space-x-3 mb-3">
+                <div
+                  :class="
+                    isDarkMode
+                      ? 'bg-indigo-900 text-indigo-400'
+                      : 'bg-indigo-100 text-indigo-600'
+                  "
+                  class="p-2 rounded-lg"
+                >
+                  <i class="fas fa-layer-group"></i>
+                </div>
+                <h3 class="text-xl font-bold">{{ stage.name }}</h3>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-4">
+                <div class="flex items-center space-x-2">
+                  <i
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                    class="fas fa-folder text-sm"
+                  ></i>
+                  <span
+                    :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                    class="text-sm font-medium"
+                  >
+                    {{ stage.categories?.length || 0 }} Categories
+                  </span>
+                </div>
+
+                <div class="flex items-center space-x-2">
+                  <i
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                    class="fas fa-weight-hanging text-sm"
+                  ></i>
+                  <span
+                    :class="[
+                      'text-sm font-bold px-3 py-1 rounded-full',
+                      stage.totalWeight === 100
+                        ? isDarkMode
+                          ? 'text-green-300 bg-green-900'
+                          : 'text-green-700 bg-green-100'
+                        : isDarkMode
+                        ? 'text-red-300 bg-red-900'
+                        : 'text-red-700 bg-red-100',
+                    ]"
+                  >
+                    {{ stage.totalWeight || 0 }}/100
+                    <i
+                      :class="
+                        stage.totalWeight === 100
+                          ? 'fas fa-check-circle'
+                          : 'fas fa-exclamation-circle'
+                      "
+                      class="ml-1"
+                    ></i>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Stage Actions -->
+            <div class="flex flex-wrap gap-2">
+              <div class="relative group">
+                <button
+                  @click="openEditStageModal(stage)"
+                  :disabled="isEventLocked"
+                  :class="[
+                    'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+                    isEventLocked ? 'opacity-50 cursor-not-allowed' : '',
+                    isDarkMode
+                      ? 'border-indigo-600 text-indigo-400 hover:bg-indigo-500 hover:text-white'
+                      : 'border-indigo-300 text-indigo-600 hover:bg-indigo-600 hover:text-white',
+                  ]"
+                  class="border"
+                >
+                  <i class="fas fa-edit"></i>
+                  <span>Edit</span>
+                </button>
+                <div
+                  v-if="isEventLocked"
+                  :class="
+                    isDarkMode
+                      ? 'bg-gray-600 text-white'
+                      : 'bg-gray-800 text-white'
+                  "
+                  class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                >
+                  Disabled: Event {{ eventStatus }}
+                </div>
+              </div>
+
+              <div class="relative group">
+                <button
+                  @click="confirmDeleteStage(stage)"
+                  :disabled="isEventLocked"
+                  :class="[
+                    'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+                    isEventLocked ? 'opacity-50 cursor-not-allowed' : '',
+                    isDarkMode
+                      ? 'border-red-600 text-red-400 hover:bg-red-500 hover:text-white'
+                      : 'border-red-300 text-red-600 hover:bg-red-600 hover:text-white',
+                  ]"
+                  class="border"
+                >
+                  <i class="fas fa-trash"></i>
+                  <span>Delete</span>
+                </button>
+                <div
+                  v-if="isEventLocked"
+                  :class="
+                    isDarkMode
+                      ? 'bg-gray-600 text-white'
+                      : 'bg-gray-800 text-white'
+                  "
+                  class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                >
+                  Disabled: Event {{ eventStatus }}
+                </div>
+              </div>
+
+              <div class="relative group">
+                <button
+                  @click="openCreateCategoryModal(stage.id)"
+                  :disabled="isEventLocked"
+                  :class="[
+                    'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+                    isEventLocked ? 'opacity-50 cursor-not-allowed' : '',
+                    isDarkMode
+                      ? 'border-green-600 text-green-400 hover:bg-green-500 hover:text-white'
+                      : 'border-green-300 text-green-600 hover:bg-green-600 hover:text-white',
+                  ]"
+                  class="border"
+                >
+                  <i class="fas fa-plus"></i>
+                  <span>Add Category</span>
+                </button>
+                <div
+                  v-if="isEventLocked"
+                  :class="
+                    isDarkMode
+                      ? 'bg-gray-600 text-white'
+                      : 'bg-gray-800 text-white'
+                  "
+                  class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                >
+                  Disabled: Event {{ eventStatus }}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-        <div v-if="stage.categories.length" class="overflow-x-auto max-w-full">
-          <table class="min-w-full divide-y divide-gray-200 text-sm">
-            <thead class="bg-gray-50">
+
+        <!-- Categories Table -->
+        <div v-if="stage.categories?.length" class="overflow-x-auto">
+          <table
+            class="min-w-full divide-y"
+            :class="isDarkMode ? 'divide-gray-600' : 'divide-gray-200'"
+          >
+            <thead :class="isDarkMode ? 'bg-gray-700' : 'bg-gray-50'">
               <tr>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                  class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider"
                 >
-                  Name
+                  <i class="fas fa-tag mr-2"></i>Name
                 </th>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                  class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider"
                 >
-                  Weight
+                  <i class="fas fa-weight-hanging mr-2"></i>Weight
                 </th>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                  class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider"
                 >
-                  Max Score
+                  <i class="fas fa-star mr-2"></i>Max Score
                 </th>
                 <th
-                  class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                  class="px-6 py-4 text-left text-xs font-bold uppercase tracking-wider"
                 >
-                  Actions
+                  <i class="fas fa-cogs mr-2"></i>Actions
                 </th>
               </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr v-for="category in stage.categories" :key="category.id">
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {{ category.name }}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {{ category.weight }}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                  {{ category.max_score }}
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      @click="openEditCategoryModal(category)"
-                      class="flex items-center gap-1 border border-indigo-200 text-indigo-600 hover:text-white hover:bg-indigo-600 px-3 py-1 rounded-md text-xs font-medium transition"
+            <tbody
+              :class="[
+                isDarkMode
+                  ? 'bg-gray-800 divide-gray-700'
+                  : 'bg-white divide-gray-200',
+                'divide-y',
+              ]"
+            >
+              <tr
+                v-for="category in stage.categories"
+                :key="category.id"
+                :class="isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-50'"
+                class="transition-colors duration-150"
+              >
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <div class="flex items-center">
+                    <div
+                      :class="
+                        isDarkMode
+                          ? 'bg-purple-900 text-purple-400'
+                          : 'bg-purple-100 text-purple-600'
+                      "
+                      class="p-2 rounded-lg mr-3"
                     >
-                      <i class="fas fa-edit"></i>
-                      Edit
-                    </button>
-                    <button
-                      @click="confirmDeleteCategory(category)"
-                      class="flex items-center gap-1 border border-red-200 text-red-600 hover:text-white hover:bg-red-600 px-3 py-1 rounded-md text-xs font-medium transition"
-                    >
-                      <i class="fas fa-trash"></i>
-                      Delete
-                    </button>
+                      <i class="fas fa-bookmark text-sm"></i>
+                    </div>
+                    <span class="text-sm font-semibold">{{
+                      category.name
+                    }}</span>
+                  </div>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <span
+                    :class="[
+                      'inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold',
+                      category.weight
+                        ? isDarkMode
+                          ? 'bg-blue-900 text-blue-200'
+                          : 'bg-blue-100 text-blue-800'
+                        : isDarkMode
+                        ? 'bg-gray-700 text-gray-300'
+                        : 'bg-gray-100 text-gray-800',
+                    ]"
+                  >
+                    {{ category.weight }}%
+                  </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <span
+                    :class="
+                      isDarkMode
+                        ? 'bg-green-900 text-green-200'
+                        : 'bg-green-100 text-green-800'
+                    "
+                    class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold"
+                  >
+                    {{ category.max_score }}
+                  </span>
+                </td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <div class="flex gap-2">
+                    <div class="relative group">
+                      <button
+                        @click="openEditCategoryModal(category)"
+                        :disabled="isEventLocked"
+                        :class="[
+                          'flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium transition-all duration-200',
+                          isEventLocked ? 'opacity-50 cursor-not-allowed' : '',
+                          isDarkMode
+                            ? 'border-indigo-600 text-indigo-400 hover:bg-indigo-500 hover:text-white'
+                            : 'border-indigo-300 text-indigo-600 hover:bg-indigo-600 hover:text-white',
+                        ]"
+                        class="border"
+                      >
+                        <i class="fas fa-edit"></i>
+                        <span>Edit</span>
+                      </button>
+                      <div
+                        v-if="isEventLocked"
+                        :class="
+                          isDarkMode
+                            ? 'bg-gray-600 text-white'
+                            : 'bg-gray-800 text-white'
+                        "
+                        class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      >
+                        Disabled: Event {{ eventStatus }}
+                      </div>
+                    </div>
+
+                    <div class="relative group">
+                      <button
+                        @click="confirmDeleteCategory(category)"
+                        :disabled="isEventLocked"
+                        :class="[
+                          'flex items-center gap-1 px-3 py-1 rounded-lg text-xs font-medium transition-all duration-200',
+                          isEventLocked ? 'opacity-50 cursor-not-allowed' : '',
+                          isDarkMode
+                            ? 'border-red-600 text-red-400 hover:bg-red-500 hover:text-white'
+                            : 'border-red-300 text-red-600 hover:bg-red-600 hover:text-white',
+                        ]"
+                        class="border"
+                      >
+                        <i class="fas fa-trash"></i>
+                        <span>Delete</span>
+                      </button>
+                      <div
+                        v-if="isEventLocked"
+                        :class="
+                          isDarkMode
+                            ? 'bg-gray-600 text-white'
+                            : 'bg-gray-800 text-white'
+                        "
+                        class="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs rounded px-2 py-1 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                      >
+                        Disabled: Event {{ eventStatus }}
+                      </div>
+                    </div>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div v-else class="px-6 py-4 text-sm text-gray-500">
-          No categories in this stage.
+
+        <!-- Empty Categories State -->
+        <div v-else class="px-6 py-12 text-center">
+          <div
+            :class="
+              isDarkMode
+                ? 'bg-gray-700 text-gray-500'
+                : 'bg-gray-100 text-gray-400'
+            "
+            class="p-4 rounded-full w-16 h-16 mx-auto mb-4 flex items-center justify-center"
+          >
+            <i class="fas fa-folder-open text-2xl"></i>
+          </div>
+          <p
+            :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+            class="font-medium"
+          >
+            No categories in this stage.
+          </p>
+          <p
+            :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'"
+            class="text-sm mt-1"
+          >
+            Add your first category to get started.
+          </p>
         </div>
       </div>
     </div>
-    <div v-else class="text-center py-10">
-      <p class="text-gray-500">No stages found.</p>
+
+    <!-- Empty Stages State -->
+    <div v-else class="text-center py-20">
+      <div
+        :class="
+          isDarkMode ? 'bg-gray-700 text-gray-500' : 'bg-gray-100 text-gray-400'
+        "
+        class="p-6 rounded-full w-24 h-24 mx-auto mb-6 flex items-center justify-center"
+      >
+        <i class="fas fa-layer-group text-3xl"></i>
+      </div>
+      <h3
+        :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+        class="text-xl font-bold mb-2"
+      >
+        No stages found
+      </h3>
+      <p :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'" class="mb-6">
+        Create your first stage to organize your event categories.
+      </p>
+      <button
+        @click="showCreateStageModal = true"
+        :disabled="isEventLocked"
+        :class="[
+          'inline-flex items-center px-6 py-3 rounded-xl transition-colors duration-200 font-medium shadow-lg',
+          isEventLocked ? 'opacity-50 cursor-not-allowed' : '',
+          isDarkMode
+            ? 'bg-green-700 hover:bg-green-600 text-white'
+            : 'bg-green-600 hover:bg-green-700 text-white',
+        ]"
+      >
+        <i class="fas fa-plus mr-2"></i>
+        Add First Stage
+      </button>
     </div>
 
-    <!-- Create Stage Modal -->
+    <!-- CREATE STAGE MODAL -->
     <div
       v-if="showCreateStageModal"
-      class="fixed inset-0 backdrop-blur-md bg-opacity-50 z-50 flex items-center justify-center p-4"
+      class="fixed inset-0 backdrop-blur-sm bg-black/50 z-50 flex items-center justify-center p-4"
+      @click="showCreateStageModal = false"
     >
       <div
-        class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative p-6 animate-in fade-in-0 zoom-in-95"
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+        class="rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative p-6 border"
+        @click.stop
       >
         <button
           @click="showCreateStageModal = false"
-          class="absolute top-3 right-3 text-gray-500 hover:text-gray-700 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100"
+          :class="
+            isDarkMode
+              ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700'
+              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          "
+          class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full transition-colors"
           type="button"
         >
           <i class="fas fa-times"></i>
         </button>
-        <h2 class="text-xl font-bold text-gray-800 mb-4">Add Stage</h2>
-        <form @submit.prevent="handleCreateStage($event)" class="space-y-4">
-          <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Stage Name</label
+
+        <div class="flex items-center space-x-3 mb-6">
+          <div
+            :class="
+              isDarkMode
+                ? 'bg-green-900 text-green-400'
+                : 'bg-green-100 text-green-600'
+            "
+            class="p-3 rounded-xl"
+          >
+            <i class="fas fa-plus text-xl"></i>
+          </div>
+          <h2 class="text-2xl font-bold">Add New Stage</h2>
+        </div>
+
+        <form @submit.prevent="handleCreateStage($event)" class="space-y-6">
+          <div>
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
             >
+              <i class="fas fa-tag mr-2"></i>Stage Name
+            </label>
             <input
               type="text"
               name="stage_name"
               required
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Enter stage name (e.g., Preliminary Round)"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-white focus:ring-green-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-green-500'
+              "
+              class="w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
             />
             <input type="hidden" name="event_id" :value="props.eventId" />
           </div>
-          <div class="flex justify-end gap-3 mt-6">
+
+          <div
+            :class="isDarkMode ? 'border-gray-600' : 'border-gray-200'"
+            class="flex justify-end gap-3 pt-4 border-t"
+          >
             <button
               type="button"
               @click="showCreateStageModal = false"
-              class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              :class="
+                isDarkMode
+                  ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'
+                  : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+              "
+              class="px-6 py-3 text-sm font-medium border rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors"
               :disabled="loading"
             >
               Cancel
@@ -454,134 +1198,282 @@ watch([stageToDelete, showDeleteStageModal], () => {
             <button
               type="submit"
               :disabled="loading"
-              class="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              :class="
+                isDarkMode
+                  ? 'bg-green-700 hover:bg-green-600'
+                  : 'bg-green-600 hover:bg-green-700'
+              "
+              class="px-6 py-3 text-sm font-medium text-white border border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors shadow-lg"
             >
               <i v-if="loading" class="fas fa-spinner fa-spin"></i>
-              {{ loading ? "Saving..." : "Save" }}
+              <i v-else class="fas fa-save"></i>
+              {{ loading ? "Creating..." : "Create Stage" }}
             </button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Edit Stage Modal -->
+    <!-- EDIT MAX SCORE MODAL -->
     <div
-      v-if="showEditStageModal"
-      class="fixed inset-0 backdrop-blur-md bg-opacity-50 z-50 flex items-center justify-center p-4"
+      v-if="showEditMaxScoreModal"
+      class="fixed inset-0 backdrop-blur-sm bg-black/50 z-50 flex items-center justify-center p-4"
+      @click="showEditMaxScoreModal = false"
     >
       <div
-        class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative p-6 animate-in fade-in-0 zoom-in-95"
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+        class="rounded-2xl shadow-2xl max-w-md w-full p-6 border"
+        @click.stop
       >
-        <button
-          @click="showEditStageModal = false"
-          class="absolute top-3 right-3 text-gray-500 hover:text-gray-700 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100"
-          type="button"
-        >
-          <i class="fas fa-times"></i>
-        </button>
-        <h2 class="text-xl font-bold text-gray-800 mb-4">Edit Stage</h2>
-        <form @submit.prevent="handleUpdateStage">
-          <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Stage Name</label
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center space-x-3">
+            <div
+              :class="
+                isDarkMode
+                  ? 'bg-blue-900 text-blue-400'
+                  : 'bg-blue-100 text-blue-600'
+              "
+              class="p-3 rounded-xl"
             >
-            <input
-              type="text"
-              name="stage_name"
-              :value="selectedStage?.name"
-              required
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            />
-            <input type="hidden" name="event_id" :value="props.eventId" />
-            <input type="hidden" name="stage_id" :value="selectedStage?.id" />
+              <i class="fas fa-star text-xl"></i>
+            </div>
+            <h2 class="text-xl font-bold">Edit Global Max Score</h2>
           </div>
-          <div class="flex justify-end gap-3 mt-6">
+          <button
+            @click="showEditMaxScoreModal = false"
+            :class="
+              isDarkMode
+                ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700'
+                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+            "
+            class="p-2 rounded-lg transition-colors"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div
+          :class="
+            isDarkMode
+              ? 'bg-blue-900/30 border-blue-800'
+              : 'bg-blue-50 border-blue-200'
+          "
+          class="mb-6 p-4 rounded-xl border"
+        >
+          <div class="flex items-start space-x-3">
+            <i
+              :class="isDarkMode ? 'text-blue-400' : 'text-blue-600'"
+              class="fas fa-info-circle mt-0.5"
+            ></i>
+            <div>
+              <p
+                :class="isDarkMode ? 'text-blue-300' : 'text-blue-800'"
+                class="text-sm font-medium"
+              >
+                Important Notice
+              </p>
+              <p
+                :class="isDarkMode ? 'text-blue-400' : 'text-blue-700'"
+                class="text-sm mt-1"
+              >
+                This will set the maximum score for all existing and future
+                categories in this event.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <form @submit.prevent="handleUpdateGlobalMaxScore($event)">
+          <div class="mb-6">
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
+            >
+              Global Max Score
+            </label>
+            <input
+              type="number"
+              name="global_max_score"
+              v-model="maxScoreForm.global_max_score"
+              required
+              min="1"
+              max="100"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-white focus:ring-blue-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-blue-500'
+              "
+              class="w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
+            />
+          </div>
+          <div class="flex justify-end gap-3">
             <button
               type="button"
-              @click="showEditStageModal = false"
-              class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              @click="showEditMaxScoreModal = false"
+              :class="
+                isDarkMode
+                  ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'
+                  : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+              "
+              class="px-6 py-3 text-sm font-medium border rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               :disabled="loading"
-              class="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              :class="
+                isDarkMode
+                  ? 'bg-blue-700 hover:bg-blue-600'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              "
+              class="px-6 py-3 text-sm font-medium text-white border border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors shadow-lg"
             >
               <i v-if="loading" class="fas fa-spinner fa-spin"></i>
-              {{ loading ? "Saving..." : "Save" }}
+              <i v-else class="fas fa-save"></i>
+              {{ loading ? "Updating..." : "Update Score" }}
             </button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Create Category Modal -->
+    <!-- CREATE CATEGORY MODAL -->
     <div
       v-if="showCreateCategoryModal"
-      class="fixed inset-0 backdrop-blur-md bg-opacity-50 z-50 flex items-center justify-center p-4"
+      class="fixed inset-0 backdrop-blur-sm bg-black/50 z-50 flex items-center justify-center p-4"
+      @click="showCreateCategoryModal = false"
     >
       <div
-        class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative p-6 animate-in fade-in-0 zoom-in-95"
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+        class="rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 border"
+        @click.stop
       >
-        <button
-          @click="showCreateCategoryModal = false"
-          class="absolute top-3 right-3 text-gray-500 hover:text-gray-700 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100"
-          type="button"
-        >
-          <i class="fas fa-times"></i>
-        </button>
-        <h2 class="text-xl font-bold text-gray-800 mb-4">Add Category</h2>
-        <form @submit.prevent="handleCreateCategory($event)" class="space-y-4">
-          <!-- Category Name -->
-          <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Category Name</label
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center space-x-3">
+            <div
+              :class="
+                isDarkMode
+                  ? 'bg-green-900 text-green-400'
+                  : 'bg-green-100 text-green-600'
+              "
+              class="p-3 rounded-xl"
             >
+              <i class="fas fa-bookmark text-xl"></i>
+            </div>
+            <h2 class="text-xl font-bold">Add Category</h2>
+          </div>
+          <button
+            @click="showCreateCategoryModal = false"
+            :class="
+              isDarkMode
+                ? 'text-gray-400 hover:text-gray-300'
+                : 'text-gray-400 hover:text-gray-600'
+            "
+            class="transition"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <form @submit.prevent="handleCreateCategory($event)" class="space-y-4">
+          <div class="mb-4">
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
+            >
+              Category Name
+            </label>
             <input
               type="text"
               name="category_name"
               required
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Enter category name"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-white focus:ring-green-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-green-500'
+              "
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
             />
           </div>
 
-          <!-- Category Weight -->
           <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Weight</label
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
             >
+              Weight (%)
+            </label>
             <input
               type="number"
               name="category_weight"
               required
-              min="0"
-              max="100"
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            />
-          </div>
-          <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Max Score</label
-            >
-            <input
-              type="number"
-              name="max_score"
-              required
               min="1"
               max="100"
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              placeholder="Enter weight percentage"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-white focus:ring-green-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-green-500'
+              "
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
             />
+            <p
+              :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+              class="text-xs mt-1"
+            >
+              Weight must be between 1-100%. Total stage weight should equal
+              100%.
+            </p>
           </div>
+
+          <div class="mb-4">
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
+            >
+              Max Score (Global Setting)
+            </label>
+            <div
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-gray-300'
+                  : 'border-gray-200 bg-gray-50 text-gray-600'
+              "
+              class="w-full border rounded-lg px-3 py-2 text-sm"
+            >
+              {{ globalMaxScore }}
+            </div>
+            <p
+              :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+              class="text-xs mt-1"
+            >
+              Max score is set globally and applies to all categories.
+            </p>
+          </div>
+
           <input type="hidden" name="event_id" :value="props.eventId" />
           <input type="hidden" name="stage_id" :value="currentStageId" />
 
-          <!-- Actions -->
           <div class="flex justify-end gap-3 mt-6">
             <button
               type="button"
               @click="showCreateCategoryModal = false"
-              class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              :class="
+                isDarkMode
+                  ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'
+                  : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+              "
+              class="px-4 py-2 text-sm font-medium border rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors"
               :disabled="loading"
             >
               Cancel
@@ -589,78 +1481,140 @@ watch([stageToDelete, showDeleteStageModal], () => {
             <button
               type="submit"
               :disabled="loading"
-              class="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              :class="
+                isDarkMode
+                  ? 'bg-green-700 hover:bg-green-600'
+                  : 'bg-green-600 hover:bg-green-700'
+              "
+              class="px-4 py-2 text-sm font-medium text-white border border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
             >
               <i v-if="loading" class="fas fa-spinner fa-spin"></i>
-              {{ loading ? "Saving..." : "Save" }}
+              {{ loading ? "Creating..." : "Create Category" }}
             </button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Edit Category Modal -->
+    <!-- EDIT CATEGORY MODAL -->
     <div
       v-if="showEditCategoryModal"
-      class="fixed inset-0 backdrop-blur-md bg-opacity-50 z-50 flex items-center justify-center p-4"
+      class="fixed inset-0 backdrop-blur-sm bg-black/50 z-50 flex items-center justify-center p-4"
+      @click="showEditCategoryModal = false"
     >
       <div
-        class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative p-6 animate-in fade-in-0 zoom-in-95"
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+        class="rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6 border"
+        @click.stop
       >
-        <button
-          @click="showEditCategoryModal = false"
-          class="absolute top-3 right-3 text-gray-500 hover:text-gray-700 w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100"
-          type="button"
-        >
-          <i class="fas fa-times"></i>
-        </button>
-        <h2 class="text-xl font-bold text-gray-800 mb-4">Edit Category</h2>
-        <form @submit.prevent="handleUpdateCategory($event)" class="space-y-4">
-          <!-- Category Name -->
-          <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Category Name</label
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center space-x-3">
+            <div
+              :class="
+                isDarkMode
+                  ? 'bg-blue-900 text-blue-400'
+                  : 'bg-blue-100 text-blue-600'
+              "
+              class="p-3 rounded-xl"
             >
+              <i class="fas fa-edit text-xl"></i>
+            </div>
+            <h2 class="text-xl font-bold">Edit Category</h2>
+          </div>
+          <button
+            @click="showEditCategoryModal = false"
+            :class="
+              isDarkMode
+                ? 'text-gray-400 hover:text-gray-300'
+                : 'text-gray-400 hover:text-gray-600'
+            "
+            class="transition"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <form @submit.prevent="handleUpdateCategory($event)" class="space-y-4">
+          <div class="mb-4">
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
+            >
+              Category Name
+            </label>
             <input
               type="text"
               name="category_name"
-              :value="selectedCategory?.category_name"
+              v-model="categoryForm.category_name"
               required
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-white focus:ring-green-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-green-500'
+              "
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
             />
           </div>
 
-          <!-- Category Weight -->
           <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Weight</label
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
             >
+              Weight (%)
+            </label>
             <input
               type="number"
               name="category_weight"
-              :value="selectedCategory?.category_weight"
-              required
-              min="0"
-              max="100"
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-            />
-          </div>
-
-          <!-- Max Score -->
-          <div class="mb-4">
-            <label class="block text-sm font-medium text-gray-700 mb-1"
-              >Max Score</label
-            >
-            <input
-              type="number"
-              name="max_score"
-              :value="selectedCategory?.max_score"
+              v-model="categoryForm.category_weight"
               required
               min="1"
               max="100"
-              class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-white focus:ring-green-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-green-500'
+              "
+              class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
             />
+            <p
+              :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+              class="text-xs mt-1"
+            >
+              Weight must be between 1-100%. Total stage weight should equal
+              100%.
+            </p>
           </div>
+
+          <div class="mb-4">
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
+            >
+              Max Score (Global Setting)
+            </label>
+            <div
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-gray-300'
+                  : 'border-gray-200 bg-gray-50 text-gray-600'
+              "
+              class="w-full border rounded-lg px-3 py-2 text-sm"
+            >
+              {{ categoryForm.max_score }}
+            </div>
+            <p
+              :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+              class="text-xs mt-1"
+            >
+              Max score is set globally and applies to all categories.
+            </p>
+          </div>
+
           <input type="hidden" name="event_id" :value="props.eventId" />
           <input
             type="hidden"
@@ -673,59 +1627,181 @@ watch([stageToDelete, showDeleteStageModal], () => {
             :value="selectedCategory?.stage_id"
           />
 
-          <!-- Actions -->
           <div class="flex justify-end gap-3 mt-6">
             <button
               type="button"
               @click="showEditCategoryModal = false"
-              class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              :class="
+                isDarkMode
+                  ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'
+                  : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+              "
+              class="px-4 py-2 text-sm font-medium border rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               :disabled="loading"
-              class="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              :class="
+                isDarkMode
+                  ? 'bg-green-700 hover:bg-green-600'
+                  : 'bg-green-600 hover:bg-green-700'
+              "
+              class="px-4 py-2 text-sm font-medium text-white border border-transparent rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
             >
               <i v-if="loading" class="fas fa-spinner fa-spin"></i>
-              {{ loading ? "Saving..." : "Save" }}
+              {{ loading ? "Updating..." : "Update Category" }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <!-- EDIT STAGE MODAL -->
+    <div
+      v-if="showEditStageModal"
+      class="fixed inset-0 backdrop-blur-sm bg-black/50 z-50 flex items-center justify-center p-4"
+      @click="showEditStageModal = false"
+    >
+      <div
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+        class="rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto relative p-6 border"
+        @click.stop
+      >
+        <button
+          @click="showEditStageModal = false"
+          :class="
+            isDarkMode
+              ? 'text-gray-400 hover:text-gray-300 hover:bg-gray-700'
+              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+          "
+          class="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full transition-colors"
+          type="button"
+        >
+          <i class="fas fa-times"></i>
+        </button>
+
+        <div class="flex items-center space-x-3 mb-6">
+          <div
+            :class="
+              isDarkMode
+                ? 'bg-blue-900 text-blue-400'
+                : 'bg-blue-100 text-blue-600'
+            "
+            class="p-3 rounded-xl"
+          >
+            <i class="fas fa-edit text-xl"></i>
+          </div>
+          <h2 class="text-2xl font-bold">Edit Stage</h2>
+        </div>
+
+        <form @submit.prevent="handleUpdateStage($event)" class="space-y-6">
+          <div>
+            <label
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              class="block text-sm font-semibold mb-2"
+            >
+              <i class="fas fa-tag mr-2"></i>Stage Name
+            </label>
+            <input
+              type="text"
+              name="stage_name"
+              v-model="stageForm.stage_name"
+              required
+              :class="
+                isDarkMode
+                  ? 'border-gray-600 bg-gray-700 text-white focus:ring-blue-400'
+                  : 'border-gray-300 bg-white text-gray-900 focus:ring-blue-500'
+              "
+              class="w-full border rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:border-transparent transition-colors"
+            />
+            <input type="hidden" name="event_id" :value="props.eventId" />
+            <input type="hidden" name="stage_id" :value="selectedStage?.id" />
+          </div>
+
+          <div
+            :class="isDarkMode ? 'border-gray-600' : 'border-gray-200'"
+            class="flex justify-end gap-3 pt-4 border-t"
+          >
+            <button
+              type="button"
+              @click="showEditStageModal = false"
+              :class="
+                isDarkMode
+                  ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'
+                  : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+              "
+              class="px-6 py-3 text-sm font-medium border rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              :disabled="loading"
+              :class="
+                isDarkMode
+                  ? 'bg-blue-700 hover:bg-blue-600'
+                  : 'bg-blue-600 hover:bg-blue-700'
+              "
+              class="px-6 py-3 text-sm font-medium text-white border border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors shadow-lg"
+            >
+              <i v-if="loading" class="fas fa-spinner fa-spin"></i>
+              <i v-else class="fas fa-save"></i>
+              {{ loading ? "Updating..." : "Update Stage" }}
             </button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Delete Stage Modal -->
+    <!-- DELETE STAGE MODAL -->
     <div
       v-if="showDeleteStageModal"
-      class="fixed inset-0 z-50 bg-opacity-30 backdrop-blur-md flex items-center justify-center p-4"
+      class="fixed inset-0 backdrop-blur-sm bg-black/50 z-50 flex items-center justify-center p-4"
+      @click="showDeleteStageModal = false"
     >
-      <div class="bg-white rounded-lg p-6 shadow-lg max-w-sm w-full">
-        <h3 class="text-lg font-semibold text-gray-800 mb-4">Confirm Delete</h3>
-        <p class="text-gray-600 mb-6">
+      <div
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+        class="rounded-2xl shadow-2xl max-w-md w-full p-6 border"
+        @click.stop
+      >
+        <div class="flex items-center space-x-3 mb-4">
+          <div class="bg-red-100 p-3 rounded-full">
+            <i class="fas fa-exclamation-triangle text-red-600 text-xl"></i>
+          </div>
+          <h3 class="text-lg font-bold text-red-600">Confirm Delete</h3>
+        </div>
+
+        <p :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'" class="mb-6">
           Are you sure you want to delete the stage
-          <strong>{{ stageToDelete?.name || "Unknown" }}</strong> and all its
+          <strong>"{{ stageToDelete?.name || "Unknown" }}"</strong> and all its
           categories? This action cannot be undone.
         </p>
+
         <div class="flex justify-end gap-3">
           <button
             @click="showDeleteStageModal = false"
-            class="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-100"
+            :class="
+              isDarkMode
+                ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'
+                : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+            "
+            class="px-4 py-2 text-sm font-medium border rounded-lg transition-colors"
           >
             Cancel
           </button>
           <button
-            @click="
-              async () => {
-                if (stageToDelete && stageToDelete.id) {
-                  await deleteStage(stageToDelete.id);
-                  showDeleteStageModal = false;
-                  stageToDelete.value = null;
-                }
-              }
-            "
+            @click="handleDeleteStage"
             :disabled="loading"
-            class="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-md disabled:opacity-50"
+            class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 transition-colors"
           >
             {{ loading ? "Deleting..." : "Delete" }}
           </button>
@@ -733,37 +1809,50 @@ watch([stageToDelete, showDeleteStageModal], () => {
       </div>
     </div>
 
-    <!-- Delete Category Modal -->
+    <!-- DELETE CATEGORY MODAL -->
     <div
       v-if="showDeleteCategoryModal"
-      class="fixed inset-0 z-50 bg-opacity-30 backdrop-blur-md flex items-center justify-center p-4"
+      class="fixed inset-0 backdrop-blur-sm bg-black/50 z-50 flex items-center justify-center p-4"
+      @click="showDeleteCategoryModal = false"
     >
-      <div class="bg-white rounded-lg p-6 shadow-lg max-w-sm w-full">
-        <h3 class="text-lg font-semibold text-gray-800 mb-4">Confirm Delete</h3>
-        <p class="text-gray-600 mb-6">
+      <div
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+        class="rounded-2xl shadow-2xl max-w-md w-full p-6 border"
+        @click.stop
+      >
+        <div class="flex items-center space-x-3 mb-4">
+          <div class="bg-red-100 p-3 rounded-full">
+            <i class="fas fa-exclamation-triangle text-red-600 text-xl"></i>
+          </div>
+          <h3 class="text-lg font-bold text-red-600">Confirm Delete</h3>
+        </div>
+
+        <p :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'" class="mb-6">
           Are you sure you want to delete the category
-          <strong>{{ categoryToDelete?.name || "Unknown" }}</strong
-          >? This action cannot be undone.
+          <strong>"{{ categoryToDelete?.name || "Unknown" }}"</strong>? This
+          action cannot be undone.
         </p>
+
         <div class="flex justify-end gap-3">
           <button
             @click="showDeleteCategoryModal = false"
-            class="px-4 py-2 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-100"
+            :class="
+              isDarkMode
+                ? 'text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600'
+                : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50'
+            "
+            class="px-4 py-2 text-sm font-medium border rounded-lg transition-colors"
           >
             Cancel
           </button>
           <button
-            @click="
-              async () => {
-                if (categoryToDelete && categoryToDelete.id) {
-                  await deleteCategory(categoryToDelete.id);
-                  showDeleteCategoryModal = false;
-                  categoryToDelete.value = null;
-                }
-              }
-            "
+            @click="handleDeleteCategory"
             :disabled="loading"
-            class="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 rounded-md disabled:opacity-50"
+            class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 transition-colors"
           >
             {{ loading ? "Deleting..." : "Delete" }}
           </button>

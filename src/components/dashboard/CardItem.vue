@@ -1,12 +1,28 @@
 <script setup>
-import { ref, defineProps, defineEmits, onUnmounted, onMounted } from "vue";
+import {
+  ref,
+  computed,
+  defineProps,
+  defineEmits,
+  onUnmounted,
+  onMounted,
+} from "vue";
 import { useRouter } from "vue-router";
+import { useToast } from "vue-toastification";
 import DeleteEventModal from "@/components/ui/DeleteEventModal.vue";
 
 const BACKEND_BASE_URL =
   import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+const toast = useToast();
 
-const props = defineProps({ event: Object });
+const props = defineProps({
+  event: Object,
+  isDarkMode: {
+    type: Boolean,
+    default: false,
+  },
+});
+
 const emit = defineEmits(["remove", "edit"]);
 const router = useRouter();
 
@@ -14,6 +30,19 @@ const showMenu = ref(false);
 const showDeleteModal = ref(false);
 const isDeleting = ref(false);
 const dropdownRef = ref(null);
+
+// Rest of your existing methods remain the same...
+// Management lock logic - Edit is disabled for both active AND completed events
+const isManagementLocked = computed(() => {
+  return (
+    props.event?.status === "active" || props.event?.status === "completed"
+  );
+});
+
+// Delete is only disabled for active events, completed events can be deleted
+const isDeleteDisabled = computed(() => {
+  return props.event?.status === "active";
+});
 
 const getImageUrl = (coverPhoto) => {
   if (!coverPhoto) return "/vsu.png";
@@ -25,6 +54,10 @@ const getImageUrl = (coverPhoto) => {
 
 const handleImageError = (event) => {
   event.target.src = "/vsu.png";
+  toast.warning("Failed to load event cover photo", {
+    timeout: 3000,
+    position: "top-right",
+  });
 };
 
 function formatDate(dateString) {
@@ -46,19 +79,100 @@ function closeMenu(e) {
 }
 
 function confirmDelete() {
+  if (isDeleteDisabled.value) {
+    toast.warning("Cannot delete active events", {
+      timeout: 3000,
+      position: "top-right",
+      icon: "fas fa-lock",
+    });
+    return;
+  }
+
   showDeleteModal.value = true;
+  showMenu.value = false;
 }
 
-function removeEvent() {
+async function removeEvent() {
+  if (isDeleting.value) return;
+
   isDeleting.value = true;
-  emit("remove", props.event.event_id);
-  showDeleteModal.value = false;
-  isDeleting.value = false;
+
+  try {
+    const loadingToastId = toast.info("Deleting event...", {
+      timeout: false,
+      closeOnClick: false,
+      pauseOnFocusLoss: false,
+      pauseOnHover: false,
+      draggable: false,
+      showCloseButtonOnHover: false,
+      hideProgressBar: false,
+      closeButton: false,
+      icon: "fas fa-spinner fa-spin",
+      position: "top-right",
+    });
+
+    await emit("remove", props.event.event_id);
+
+    toast.dismiss(loadingToastId);
+    toast.success(
+      `"${props.event.event_name}" has been deleted successfully!`,
+      {
+        timeout: 4000,
+        position: "top-right",
+        icon: "fas fa-check-circle",
+      }
+    );
+
+    showDeleteModal.value = false;
+  } catch (error) {
+    console.error("Failed to delete event:", error);
+    toast.error(
+      `Failed to delete "${props.event.event_name}". Please try again.`,
+      {
+        timeout: 5000,
+        position: "top-right",
+        icon: "fas fa-exclamation-triangle",
+      }
+    );
+  } finally {
+    isDeleting.value = false;
+  }
 }
+
+function handleEdit() {
+  if (isManagementLocked.value) {
+    const eventStatus = props.event?.status;
+    const message =
+      eventStatus === "active"
+        ? "Cannot edit active events"
+        : "Cannot edit completed events";
+
+    toast.warning(message, {
+      timeout: 3000,
+      position: "top-right",
+      icon: "fas fa-lock",
+    });
+    return;
+  }
+
+  emit("edit", props.event);
+  showMenu.value = false;
+}
+
+// Helper function to get the appropriate tooltip message
+const getEditTooltipMessage = computed(() => {
+  if (!isManagementLocked.value) return "";
+
+  const eventStatus = props.event?.status;
+  return eventStatus === "active"
+    ? "Cannot edit active events"
+    : "Cannot edit completed events";
+});
 
 onMounted(() => {
   document.addEventListener("click", closeMenu);
 });
+
 onUnmounted(() => {
   document.removeEventListener("click", closeMenu);
 });
@@ -66,46 +180,50 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="bg-white rounded-lg border shadow-md hover:shadow-lg transition p-4 relative flex flex-col h-80 z-10 overflow-hidden"
-    :class="{
-      'border-green-400': event.status === 'active',
-      'border-yellow-400': event.status === 'inactive',
-      'border-gray-400': event.status === 'completed',
-    }"
+    class="rounded-lg border shadow-md hover:shadow-lg transition-all duration-200 p-4 relative flex flex-col h-80 overflow-hidden transform hover:scale-[1.02]"
+    :class="[
+      isDarkMode ? 'bg-gray-800' : 'bg-white',
+      {
+        'border-green-400 dark:border-green-500': event.status === 'active',
+        'border-yellow-400 dark:border-yellow-500': event.status === 'inactive',
+        'border-gray-400 dark:border-gray-500': event.status === 'completed',
+      },
+    ]"
   >
     <!-- Cover Photo -->
     <router-link
       :to="`/events/${event.event_id}`"
-      class="w-full h-1/2 mb-2 clickable-area"
+      class="w-full h-1/2 mb-2 clickable-area rounded overflow-hidden"
     >
       <img
         :src="getImageUrl(event.cover_photo)"
         :alt="`${event.event_name || 'Event'} Cover`"
-        class="h-full w-full object-cover rounded"
+        class="h-full w-full object-cover rounded transition-transform duration-200 hover:scale-105"
         @error="handleImageError"
       />
     </router-link>
 
     <!-- Details -->
-    <div class="w-full flex flex-col justify-between">
+    <div class="w-full flex flex-col justify-between flex-1">
       <div class="mb-4">
         <router-link
           :to="`/events/${event.event_id}`"
           class="flex flex-wrap items-center justify-between gap-2 clickable-area"
         >
           <div
-            class="text-lg font-semibold text-green-800 hover:underline truncate"
+            class="text-lg font-semibold hover:underline truncate transition-colors duration-200"
+            :class="isDarkMode ? 'text-green-200' : 'text-green-800'"
           >
             {{ event.event_name }}
           </div>
           <div class="flex gap-2">
             <!-- Status Badge -->
             <div
-              class="text-xs text-white px-2 py-1 rounded inline-flex items-center"
+              class="text-xs text-white px-2 py-1 rounded inline-flex items-center transition-all duration-200"
               :class="{
-                'bg-green-400': event.status === 'active',
-                'bg-yellow-400': event.status === 'inactive',
-                'bg-gray-400': event.status === 'completed',
+                'bg-green-500 shadow-green-200': event.status === 'active',
+                'bg-yellow-500 shadow-yellow-200': event.status === 'inactive',
+                'bg-gray-500 shadow-gray-200': event.status === 'completed',
               }"
             >
               <i
@@ -126,7 +244,7 @@ onUnmounted(() => {
             <!-- Division Badge -->
             <div
               v-if="event.division"
-              class="text-xs text-white px-2 py-1 rounded inline-flex items-center"
+              class="text-xs text-white px-2 py-1 rounded inline-flex items-center transition-all duration-200"
               :class="{
                 'bg-indigo-500': event.division === 'standard',
                 'bg-blue-500': event.division === 'male-only',
@@ -154,13 +272,25 @@ onUnmounted(() => {
         </router-link>
       </div>
 
-      <div class="mt-auto">
-        <p class="text-sm text-gray-600 mt-4">
-          <i class="fas fa-map-marker-alt mr-1"></i>
+      <div class="mt-auto space-y-2">
+        <p
+          class="text-sm flex items-center transition-colors duration-200"
+          :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+        >
+          <i
+            class="fas fa-map-marker-alt mr-2 transition-colors duration-200"
+            :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+          ></i>
           <span>{{ event.venue || "Not set" }}</span>
         </p>
-        <p class="text-sm text-gray-600 mt-2">
-          <i class="fas fa-calendar-alt mr-1"></i>
+        <p
+          class="text-sm flex items-center transition-colors duration-200"
+          :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+        >
+          <i
+            class="fas fa-calendar-alt mr-2 transition-colors duration-200"
+            :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+          ></i>
           <span>{{ formatDateRange(event.start_date, event.end_date) }}</span>
         </p>
       </div>
@@ -170,49 +300,132 @@ onUnmounted(() => {
     <div class="absolute bottom-2 right-2">
       <button
         @click.stop="showMenu = !showMenu"
-        class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-200 transition"
+        class="w-10 h-10 flex items-center justify-center rounded-full transition-all duration-200"
+        :class="isDarkMode ? 'hover:bg-gray-600' : 'hover:bg-gray-200'"
+        :title="showMenu ? 'Close menu' : 'Open menu'"
       >
-        <i class="fas fa-ellipsis-v text-lg text-gray-600"></i>
+        <i
+          class="fas fa-ellipsis-v text-lg transition-colors duration-200"
+          :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+        ></i>
       </button>
-      <div
-        v-if="showMenu"
-        ref="dropdownRef"
-        class="dropdown-menu absolute right-0 bottom-10 w-40 bg-white rounded shadow-md border z-50"
+
+      <Transition
+        enter-active-class="transition duration-200 ease-out"
+        enter-from-class="transform scale-95 opacity-0"
+        enter-to-class="transform scale-100 opacity-100"
+        leave-active-class="transition duration-150 ease-in"
+        leave-from-class="transform scale-100 opacity-100"
+        leave-to-class="transform scale-95 opacity-0"
       >
-        <a
-          href="#"
-          @click.prevent="$emit('edit', event)"
-          class="block px-2 py-2 text-sm hover:bg-gray-100"
+        <div
+          v-if="showMenu"
+          ref="dropdownRef"
+          class="dropdown-menu absolute right-0 bottom-10 w-44 rounded-lg shadow-lg border overflow-hidden z-50"
+          :class="
+            isDarkMode
+              ? 'bg-gray-700 border-gray-600'
+              : 'bg-white border-gray-200'
+          "
         >
-          <i class="fas fa-edit"></i>
-          <span class="ml-2">Update</span>
-        </a>
-        <a
-          href="#"
-          @click.prevent="confirmDelete"
-          class="block px-2 py-2 text-sm hover:bg-gray-100"
-        >
-          <i class="fas fa-trash"></i>
-          <span class="ml-2">Delete</span>
-        </a>
-      </div>
+          <!-- Edit Option -->
+          <a
+            href="#"
+            @click.prevent="handleEdit"
+            class="flex items-center px-4 py-3 text-sm transition-colors duration-200 relative group"
+            :class="[
+              isManagementLocked
+                ? 'cursor-not-allowed'
+                : isDarkMode
+                ? 'hover:bg-gray-600 text-white'
+                : 'hover:bg-gray-100',
+              isManagementLocked
+                ? isDarkMode
+                  ? 'text-gray-500'
+                  : 'text-gray-400'
+                : '',
+            ]"
+          >
+            <i
+              class="w-4"
+              :class="
+                isManagementLocked
+                  ? 'fas fa-lock text-gray-400'
+                  : 'fas fa-edit text-blue-500'
+              "
+            ></i>
+            <span class="ml-3">Edit Event</span>
+
+            <!-- Tooltip for disabled edit -->
+            <div
+              v-if="isManagementLocked"
+              class="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none"
+            >
+              {{ getEditTooltipMessage }}
+            </div>
+          </a>
+          <a
+            href="#"
+            @click.prevent="confirmDelete"
+            class="flex items-center px-4 py-3 text-sm transition-colors duration-200 relative group"
+            :class="[
+              isDeleteDisabled
+                ? 'cursor-not-allowed'
+                : isDarkMode
+                ? 'hover:bg-gray-600'
+                : 'hover:bg-gray-100',
+              isDeleteDisabled
+                ? isDarkMode
+                  ? 'text-gray-500'
+                  : 'text-gray-400'
+                : isDarkMode
+                ? 'text-red-400'
+                : 'text-red-600',
+            ]"
+          >
+            <i
+              class="w-4"
+              :class="
+                isDeleteDisabled
+                  ? 'fas fa-lock text-gray-400'
+                  : 'fas fa-trash text-red-500'
+              "
+            ></i>
+            <span class="ml-3">Delete Event</span>
+
+            <!-- Tooltip for disabled delete -->
+            <div
+              v-if="isDeleteDisabled"
+              class="absolute left-full ml-2 px-2 py-1 bg-gray-800 text-white text-xs rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none"
+            >
+              Cannot delete active events
+            </div>
+          </a>
+        </div>
+      </Transition>
     </div>
 
-    <!-- Delete Confirmation Modal -->
-    <DeleteEventModal
-      :show="showDeleteModal"
-      :loading="isDeleting"
-      @close="showDeleteModal = false"
-      @confirm="removeEvent"
-    />
+    <!-- Delete Confirmation Modal with Teleport -->
+    <Teleport to="body">
+      <DeleteEventModal
+        :show="showDeleteModal"
+        :loading="isDeleting"
+        :is-dark-mode="isDarkMode"
+        @close="showDeleteModal = false"
+        @confirm="removeEvent"
+      />
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .clickable-area {
-  transition: background-color 0.2s ease;
+  transition: all 0.2s ease;
 }
 .clickable-area:hover {
   background-color: rgba(0, 0, 0, 0.02);
+}
+.dark .clickable-area:hover {
+  background-color: rgba(255, 255, 255, 0.05);
 }
 </style>

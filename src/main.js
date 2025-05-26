@@ -1,6 +1,7 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { useUserStore } from "@/stores/user";
+import { useDarkModeStore } from "@/stores/darkMode"; // Add this import
 import mitt from "mitt";
 import App from "./App.vue";
 import router from "./router";
@@ -60,6 +61,11 @@ app.config.errorHandler = (err, vm, info) => {
 };
 
 app.use(createPinia());
+
+// Initialize dark mode after pinia is set up
+const darkModeStore = useDarkModeStore();
+darkModeStore.initializeDarkMode();
+
 app.use(router);
 app.config.globalProperties.emitter = emitter;
 app.use(Toast, {
@@ -79,11 +85,9 @@ app.use(FloatingVue);
 const userStore = useUserStore();
 const token = localStorage.getItem("token");
 if (token) {
-  userStore.fetchUser().then((isAuthenticated) => {
-    console.log("User authenticated:", isAuthenticated, userStore.user);
+  userStore.fetchUser().then(() => {
     app.mount("#app");
   });
 } else {
-  console.log("No token found, skipping initial fetchUser.");
   app.mount("#app");
 }

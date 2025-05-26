@@ -85,11 +85,14 @@ axiosClient.interceptors.response.use(
   (response) => {
     const contentType = response.headers?.["content-type"] ?? "";
 
+    // Handle blob responses (PDFs, CSV, etc.)
     if (
       contentType.includes("application/octet-stream") ||
-      contentType.includes("text/csv")
+      contentType.includes("text/csv") ||
+      contentType.includes("application/pdf") || // Add this line
+      response.config?.responseType === "blob" // Add this line
     ) {
-      return response; // for file downloads
+      return response; // Return full response for downloads/blobs
     }
 
     return response.data; // Default for API responses
