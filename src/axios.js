@@ -2,7 +2,7 @@ import axios from "axios";
 import router from "./router.js";
 
 const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_URL || "http://localhost:8000",
+  baseURL: import.meta.env.VITE_BACKEND_URL,
   withCredentials: true, // default for most requests
   withXSRFToken: true,
   headers: {
