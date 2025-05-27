@@ -139,7 +139,7 @@ axiosClient.interceptors.response.use(
     if (error.response?.status === 401 || error.response?.status === 403) {
       // Skip auth error handling for login endpoints
       const isLoginEndpoint =
-        error.config?.url?.includes("/login") ||
+        error.config?.url?.includes("/login/admin") ||
         error.config?.url?.includes("/csrf-cookie");
 
       if (!isLoginEndpoint) {
