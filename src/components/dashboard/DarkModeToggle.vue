@@ -13,69 +13,54 @@ const toggleDarkMode = () => {
 <template>
   <button
     @click="toggleDarkMode"
-    class="dark-mode-toggle"
-    :class="{ 'dark-mode-active': isDarkMode }"
+    class="relative p-3 rounded-lg transition-all duration-300 ease-in-out hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2"
+    :class="
+      isDarkMode
+        ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400 focus:ring-yellow-400'
+        : 'bg-gray-100 hover:bg-gray-200 text-gray-600 focus:ring-blue-500'
+    "
     aria-label="Toggle dark mode"
   >
-    <div class="toggle-container">
-      <i class="fas fa-sun sun-icon" :class="{ 'sun-hidden': isDarkMode }"></i>
+    <div class="relative w-5 h-5 overflow-hidden">
+      <!-- Sun Icon -->
       <i
-        class="fas fa-moon moon-icon"
-        :class="{ 'moon-visible': isDarkMode }"
+        class="fas fa-sun absolute inset-0 flex items-center justify-center transition-all duration-300 ease-in-out"
+        :class="
+          isDarkMode
+            ? 'opacity-0 transform rotate-180 scale-50'
+            : 'opacity-100 transform rotate-0 scale-100'
+        "
+      ></i>
+
+      <!-- Moon Icon -->
+      <i
+        class="fas fa-moon absolute inset-0 flex items-center justify-center transition-all duration-300 ease-in-out"
+        :class="
+          isDarkMode
+            ? 'opacity-100 transform rotate-0 scale-100'
+            : 'opacity-0 transform -rotate-180 scale-50'
+        "
       ></i>
     </div>
   </button>
 </template>
 
 <style scoped>
-.dark-mode-toggle {
-  position: relative;
-  padding: 0.5rem;
-  border-radius: 0.375rem;
-  background-color: rgba(255, 255, 255, 0.1);
-  border: none;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  overflow: hidden;
+/* Additional styling for smooth transitions */
+.fas {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.dark-mode-toggle:hover {
-  background-color: rgba(255, 255, 255, 0.2);
+button:hover .fas {
+  transform: scale(1.1);
 }
 
-.toggle-container {
-  position: relative;
-  width: 1.5rem;
-  height: 1.5rem;
-}
-
-.sun-icon,
-.moon-icon {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  transition: all 0.3s ease;
-  color: #fbbf24;
-}
-
-.moon-icon {
-  color: #60a5fa;
-  opacity: 0;
-  transform: translate(-50%, -50%) rotate(180deg);
-}
-
-.moon-visible {
-  opacity: 1;
-  transform: translate(-50%, -50%) rotate(0deg);
-}
-
-.sun-hidden {
-  opacity: 0;
-  transform: translate(-50%, -50%) rotate(-180deg);
-}
-
-.dark-mode-active {
-  background-color: rgba(59, 130, 246, 0.2);
+/* Ensure proper centering */
+.fas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
 }
 </style>

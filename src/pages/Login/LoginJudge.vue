@@ -153,7 +153,7 @@ onMounted(() => {
         <a href="/">
           <img
             class="h-20 mb-8 w-auto"
-            src="/logoFI.png"
+            src="/MMVSU.png"
             alt="Visayas State University Logo"
           />
         </a>

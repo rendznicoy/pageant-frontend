@@ -9,7 +9,8 @@
       "@ui/*": ["src/components/ui/*"],
       "@pages/*": ["src/pages/*"],
       "@lib/*": ["src/lib/*"],
-      "@assets/*": ["src/assets/*"]
+      "@assets/*": ["src/assets/*"],
+      "@utils/*": ["src/utils/*"]
     }
   },
   "include": ["src"],

@@ -1,13 +1,16 @@
 <script setup>
 import { computed, ref, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
+import { useToast } from "vue-toastification";
 import { useDarkModeStore } from "@/stores/darkMode";
 import { useUserStore } from "@/stores/user";
 import { useSidebarStore } from "@/stores/sidebar";
+import { setToastInstance } from "@/utils/toast";
 import Navbar from "@/components/dashboard/Navbar.vue";
 import Sidebar from "@/components/dashboard/Sidebar.vue";
 
 const route = useRoute();
+const toast = useToast();
 const darkModeStore = useDarkModeStore();
 const userStore = useUserStore();
 const sidebar = useSidebarStore();
@@ -26,10 +29,15 @@ const isJudgeDashboard = computed(() => {
   );
 });
 
+// Check if user is a judge - this is the key addition
+const isJudgeUser = computed(() => {
+  return userStore.user?.role === "judge";
+});
+
 // Navigation links based on user role and current context
 const navigationLinks = computed(() => {
   const user = userStore.user;
-  if (!user || isJudgeDashboard.value) return [];
+  if (!user || isJudgeDashboard.value || isJudgeUser.value) return [];
 
   const links = [];
 
@@ -41,20 +49,20 @@ const navigationLinks = computed(() => {
     icon: "fas fa-tachometer-alt",
   });
 
+  if (user.role === "admin") {
+    links.push({
+      name: "Users",
+      path: "/users",
+      icon: "fas fa-users",
+    });
+  }
+
   // Role-based links
   if (user.role === "admin" || user.role === "tabulator") {
     links.push({
       name: "Create Event",
       path: "/events/create",
       icon: "fas fa-plus-circle",
-    });
-  }
-
-  if (user.role === "admin") {
-    links.push({
-      name: "Users",
-      path: "/users",
-      icon: "fas fa-users",
     });
   }
 
@@ -69,7 +77,7 @@ const handleRefreshDashboard = () => {
 watch(
   () => route.path,
   (newPath) => {
-    if (newPath.startsWith("/judge")) {
+    if (newPath.startsWith("/judge") || isJudgeUser.value) {
       sidebar.close();
     }
   },
@@ -77,6 +85,9 @@ watch(
 );
 
 onMounted(() => {
+  // Initialize toast system
+  setToastInstance(toast);
+
   // Initialize dark mode first
   darkModeStore.initializeDarkMode();
 
@@ -104,17 +115,17 @@ onMounted(() => {
     class="app-container"
     :class="isDarkMode ? 'dark bg-gray-900' : 'bg-gray-50'"
   >
-    <!-- Navbar - Hidden for judge dashboard -->
+    <!-- Navbar - Hidden for judge dashboard AND judge users -->
     <Navbar
-      v-if="!isJudgeDashboard"
+      v-if="!isJudgeDashboard && !isJudgeUser"
       :event-status="currentEventStatus"
       :navigation-links="navigationLinks"
       @refresh-dashboard="handleRefreshDashboard"
     />
 
-    <!-- Sidebar - Hidden for judge dashboard -->
+    <!-- Sidebar - Hidden for judge dashboard AND judge users -->
     <Sidebar
-      v-if="!isJudgeDashboard && isAuthenticated"
+      v-if="!isJudgeDashboard && !isJudgeUser && isAuthenticated"
       :role="userRole"
       @refresh-dashboard="handleRefreshDashboard"
     />
@@ -123,9 +134,9 @@ onMounted(() => {
     <main
       class="main-content"
       :class="[
-        !isJudgeDashboard && sidebar.isOpen ? 'lg:ml-80' : '',
+        !isJudgeDashboard && !isJudgeUser && sidebar.isOpen ? 'lg:ml-80' : '',
         isDarkMode ? 'bg-gray-900 text-white' : 'bg-gray-50 text-gray-900',
-        isJudgeDashboard ? 'pt-0' : 'pt-16',
+        isJudgeDashboard || isJudgeUser ? 'pt-0' : 'pt-16',
       ]"
     >
       <div class="content-wrapper" :class="isDarkMode ? 'dark' : ''">

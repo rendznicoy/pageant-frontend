@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useToast } from "vue-toastification";
 import axiosClient from "@/axios";
+import { useEventStore } from "@/stores/event";
 
 let interval = null;
 
@@ -20,16 +21,33 @@ const judgesByStage = ref({});
 const eventMaxScore = ref(100);
 const categoryResults = ref({});
 const isDarkMode = ref(false);
+const eventStore = useEventStore();
+
+const formatScore = (score) => {
+  const numScore = parseFloat(score || 0);
+  return numScore.toFixed(2);
+};
+
+const formatMeanRating = (rating) => {
+  const numRating = parseFloat(rating || 0);
+  return numRating.toFixed(2);
+};
+
+const formatMeanRank = (rank) => {
+  const numRank = parseFloat(rank || 0);
+  return numRank.toFixed(2);
+};
+
+// New: All candidates with confirmed scores regardless of active status
+const allPartialResults = ref({});
 
 // Whole-page pagination
 const currentPage = ref(1);
 const itemsPerPage = ref(1); // Show 1 section per page
 
-// Create a computed property for all sections
 const allSections = computed(() => {
   const sections = [];
 
-  // Final Results section
   if (finalResults.value.length > 0) {
     sections.push({
       type: "final",
@@ -39,7 +57,6 @@ const allSections = computed(() => {
     });
   }
 
-  // Category Results sections
   Object.entries(categoryResults.value).forEach(([stageId, stageData]) => {
     if (stageData?.categories?.length > 0) {
       const stage = stages.value.find(
@@ -56,7 +73,6 @@ const allSections = computed(() => {
     }
   });
 
-  // Stage Results sections
   Object.entries(partialResultsByStage.value).forEach(
     ([stageId, stageData]) => {
       if (stageData?.males?.length > 0 || stageData?.females?.length > 0) {
@@ -74,6 +90,18 @@ const allSections = computed(() => {
       }
     }
   );
+
+  // Append the All Candidates Section
+  if (
+    allPartialResults.value?.males?.length ||
+    allPartialResults.value?.females?.length
+  ) {
+    sections.push({
+      type: "all",
+      title: "All Candidates (Confirmed Scores)",
+      data: allPartialResults.value,
+    });
+  }
 
   return sections;
 });
@@ -114,7 +142,7 @@ const startAutoRefresh = () => {
       fetchAllPartialResults();
       fetchCategoryResults();
     }
-  }, 30000);
+  }, 30000); // Changed from 600000 (10 minutes) to 30000 (30 seconds)
 };
 
 const stopAutoRefresh = () => {
@@ -160,6 +188,7 @@ const exportResultsCSV = async () => {
       "Team",
       "Sex",
       "Mean Rating",
+      "Mean Rank", // Add Mean Rank column
       "Overall Rank",
     ];
     csvData.push(headers);
@@ -178,8 +207,9 @@ const exportResultsCSV = async () => {
           `${result.candidate.first_name} ${result.candidate.last_name}`,
           result.candidate.team || "N/A",
           "Male",
-          Number(result.mean_rating || result.raw_average || 0).toFixed(2),
-          result.rank || result.overall_rank || "N/A", // Use the rank assigned by rankBySex
+          parseFloat(result.mean_rating || result.raw_average || 0).toFixed(2), // Ensure 2 decimal places
+          parseFloat(result.mean_rank || 0).toFixed(2), // Add mean rank with 2 decimal places
+          result.rank || result.overall_rank || "N/A",
         ];
         csvData.push(row);
       });
@@ -194,8 +224,9 @@ const exportResultsCSV = async () => {
           `${result.candidate.first_name} ${result.candidate.last_name}`,
           result.candidate.team || "N/A",
           "Female",
-          Number(result.mean_rating || result.raw_average || 0).toFixed(2),
-          result.rank || result.overall_rank || "N/A", // Use the rank assigned by rankBySex
+          parseFloat(result.mean_rating || result.raw_average || 0).toFixed(2), // Ensure 2 decimal places
+          parseFloat(result.mean_rank || 0).toFixed(2), // Add mean rank with 2 decimal places
+          result.rank || result.overall_rank || "N/A",
         ];
         csvData.push(row);
       });
@@ -278,14 +309,13 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
     return { males, females };
   }
 
-  const activeCandidates = candidates.filter(
-    (c) => c.candidate?.is_active !== false
-  );
+  // 🔥 Fix: include all candidates regardless of is_active
+  const visibleCandidates = candidates;
 
-  const males = activeCandidates.filter((c) => c.sex?.toLowerCase() === "m");
-  const females = activeCandidates.filter((c) => c.sex?.toLowerCase() === "f");
+  const males = visibleCandidates.filter((c) => c.sex?.toLowerCase() === "m");
+  const females = visibleCandidates.filter((c) => c.sex?.toLowerCase() === "f");
 
-  // Sort by mean_rank (ascending), then by mean_rating (descending)
+  // Sort by mean_rank (ascending), then mean_rating (descending)
   const sortedMales = males
     .sort((a, b) => {
       if ((a.mean_rank || 999) === (b.mean_rank || 999)) {
@@ -347,6 +377,8 @@ const fetchCategoryResults = async () => {
         const categoryRes = await axiosClient.get(
           `/api/v1/events/${eventId}/stages/${stageId}/category-results`
         );
+
+        // Fix: Handle response consistently
         categoryResults.value[stageId] = categoryRes.data || categoryRes;
       } catch (stageError) {
         console.error(
@@ -362,36 +394,39 @@ const fetchCategoryResults = async () => {
   }
 };
 
-// e5e7eb partial results fetching
+// Partial results fetching
 const fetchAllPartialResults = async () => {
   if (!eventId) return;
 
   try {
     const eventResponse = await axiosClient.get(`/api/v1/events/${eventId}`);
-    const eventData = eventResponse.data || eventResponse;
+    const eventData = eventResponse;
     eventMaxScore.value =
       eventData.max_score || eventData.global_max_score || 100;
 
     const res = await axiosClient.get(`/api/v1/events/${eventId}/stages`);
-    stages.value = Array.isArray(res) ? res : res.data ?? [];
+    stages.value = Array.isArray(res.data)
+      ? res.data
+      : res.data?.data || res || [];
 
     for (const stage of stages.value) {
       const stageId = stage.id || stage.stage_id;
 
-      try {
-        const partial = await axiosClient.get(
-          `/api/v1/events/${eventId}/stages/${stageId}/partial-results`
-        );
+      // Use the permanent results endpoint for Results Tab
+      const partial = await axiosClient.get(
+        `/api/v1/events/${eventId}/stages/${stageId}/partial-results-permanent`
+      );
 
-        const { males, females } = rankBySex(partial.candidates || [], true);
-        partialResultsByStage.value[stageId] = { males, females };
-        judgesByStage.value[stageId] = partial.judges || [];
-      } catch (stageError) {
-        console.error(
-          `Error fetching partial results for stage ${stageId}:`,
-          stageError
-        );
-      }
+      const partialData = partial.data
+        ? partial
+        : { data: { candidates: partial.candidates || partial } };
+      const candidates =
+        partialData.data?.candidates || partialData.candidates || [];
+
+      const { males, females } = rankBySex(candidates, true);
+      partialResultsByStage.value[stageId] = { males, females };
+      judgesByStage.value[stageId] =
+        partialData.data?.judges || partialData.judges || [];
     }
   } catch (e) {
     console.error("Error fetching partial results:", e);
@@ -407,7 +442,9 @@ const fetchFinalResults = async () => {
   loading.value = true;
   try {
     const eventResponse = await axiosClient.get(`/api/v1/events/${eventId}`);
-    const eventData = eventResponse.data || eventResponse;
+
+    // Fix: Handle axios interceptor unwrapping consistently
+    const eventData = eventResponse; // axios interceptor already unwrapped it
     eventMaxScore.value =
       eventData.max_score || eventData.global_max_score || 100;
 
@@ -415,6 +452,7 @@ const fetchFinalResults = async () => {
       `/api/v1/events/${eventId}/scores/final-results`
     );
 
+    // Handle final results response
     finalResults.value = Array.isArray(data?.candidates) ? data.candidates : [];
     finalJudges.value = Array.isArray(data?.judges) ? data.judges : [];
 
@@ -430,6 +468,8 @@ const fetchFinalResults = async () => {
 };
 
 // PDF functions
+// Replace both downloadReport and previewReport functions in ResultsTab.vue:
+
 const downloadReport = async () => {
   if (!finalResults.value.length) {
     toast.info("No results to download.");
@@ -442,10 +482,31 @@ const downloadReport = async () => {
       responseType: "blob",
     });
 
-    const blob =
-      response instanceof Blob
-        ? response
-        : new Blob([response], { type: "application/pdf" });
+    console.log("Download response:", response); // Debug log
+
+    // Handle the blob response - axios interceptor returns full response for blobs
+    let blob;
+    if (response.data && response.data instanceof Blob) {
+      blob = response.data;
+    } else if (response instanceof Blob) {
+      blob = response;
+    } else {
+      console.error("Unexpected response format:", response);
+      throw new Error("Invalid response format for PDF download");
+    }
+
+    // Verify blob has content and correct type
+    console.log("Blob size:", blob.size, "Blob type:", blob.type); // Debug log
+
+    if (blob.size === 0) {
+      throw new Error("Received empty PDF file");
+    }
+
+    // Force PDF mime type if not set
+    if (!blob.type || blob.type === "application/octet-stream") {
+      blob = new Blob([blob], { type: "application/pdf" });
+    }
+
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -458,7 +519,10 @@ const downloadReport = async () => {
     toast.success("Report downloaded successfully!");
   } catch (error) {
     console.error("Download error:", error);
-    toast.error(error.response?.data?.message || "Failed to download report.");
+    toast.error(
+      error.response?.data?.message ||
+        "Failed to download report: " + error.message
+    );
   } finally {
     loading.value = false;
   }
@@ -479,18 +543,39 @@ const previewReport = async () => {
       }
     );
 
-    // Handle both cases - with and without interceptor transformation
-    const blob = response.data
-      ? new Blob([response.data], { type: "application/pdf" })
-      : response instanceof Blob
-      ? response
-      : new Blob([response], { type: "application/pdf" });
+    console.log("Preview response:", response); // Debug log
+
+    // Handle the blob response - axios interceptor returns full response for blobs
+    let blob;
+    if (response.data && response.data instanceof Blob) {
+      blob = response.data;
+    } else if (response instanceof Blob) {
+      blob = response;
+    } else {
+      console.error("Unexpected response format:", response);
+      throw new Error("Invalid response format for PDF preview");
+    }
+
+    // Verify blob has content and correct type
+    console.log("Blob size:", blob.size, "Blob type:", blob.type); // Debug log
+
+    if (blob.size === 0) {
+      throw new Error("Received empty PDF file");
+    }
+
+    // Force PDF mime type if not set
+    if (!blob.type || blob.type === "application/octet-stream") {
+      blob = new Blob([blob], { type: "application/pdf" });
+    }
 
     previewUrl.value = window.URL.createObjectURL(blob);
     showPreview.value = true;
   } catch (error) {
     console.error("Preview error:", error);
-    toast.error(error.response?.data?.message || "Failed to preview report.");
+    toast.error(
+      error.response?.data?.message ||
+        "Failed to preview report: " + error.message
+    );
   } finally {
     loading.value = false;
   }
@@ -510,7 +595,6 @@ onMounted(async () => {
     loading.value = true;
     try {
       await Promise.all([fetchFinalResults(), fetchAllPartialResults()]);
-      // Fetch category results after stages are loaded
       await fetchCategoryResults();
     } catch (error) {
       console.error("Error during initial load:", error);
@@ -565,10 +649,11 @@ onUnmounted(() => {
         </div>
 
         <!-- Action buttons -->
-        <div class="flex flex-wrap gap-2">
+        <!-- Action buttons -->
+        <div class="flex flex-row gap-2 flex-wrap sm:flex-nowrap">
           <button
             @click="refreshResults"
-            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg whitespace-nowrap"
             :class="
               isDarkMode
                 ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
@@ -582,7 +667,7 @@ onUnmounted(() => {
 
           <button
             @click="exportResultsCSV"
-            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg whitespace-nowrap"
             :class="
               isDarkMode
                 ? 'bg-purple-700 hover:bg-purple-600 text-purple-100'
@@ -596,7 +681,7 @@ onUnmounted(() => {
 
           <button
             @click="previewReport"
-            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg whitespace-nowrap"
             :class="
               isDarkMode
                 ? 'bg-blue-700 hover:bg-blue-600 text-blue-100'
@@ -610,7 +695,7 @@ onUnmounted(() => {
 
           <button
             @click="downloadReport"
-            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            class="flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-all duration-200 shadow-md hover:shadow-lg whitespace-nowrap"
             :class="
               isDarkMode
                 ? 'bg-green-700 hover:bg-green-600 text-green-100'
@@ -861,7 +946,7 @@ onUnmounted(() => {
                         getScoreColorClass(result.mean_rating, eventMaxScore)
                       "
                     >
-                      {{ Number(result.mean_rating || 0).toFixed(1) }}/{{
+                      {{ Number(result.mean_rating || 0).toFixed(2) }}/{{
                         eventMaxScore
                       }}
                     </span>
@@ -1001,7 +1086,7 @@ onUnmounted(() => {
                         getScoreColorClass(result.mean_rating, eventMaxScore)
                       "
                     >
-                      {{ Number(result.mean_rating || 0).toFixed(1) }}/{{
+                      {{ Number(result.mean_rating || 0).toFixed(2) }}/{{
                         eventMaxScore
                       }}
                     </span>
@@ -1142,7 +1227,7 @@ onUnmounted(() => {
                             )
                           "
                         >
-                          {{ Number(result.category_average).toFixed(1) }}/{{
+                          {{ Number(result.category_average).toFixed(2) }}/{{
                             category.max_score
                           }}
                         </span>
@@ -1248,7 +1333,7 @@ onUnmounted(() => {
                             )
                           "
                         >
-                          {{ Number(result.category_average).toFixed(1) }}/{{
+                          {{ Number(result.category_average).toFixed(2) }}/{{
                             category.max_score
                           }}
                         </span>
@@ -1346,7 +1431,7 @@ onUnmounted(() => {
                         {{
                           Number(
                             result.mean_rating || result.raw_average || 0
-                          ).toFixed(1)
+                          ).toFixed(2)
                         }}/{{ eventMaxScore }}
                       </span>
                     </td>
@@ -1439,7 +1524,7 @@ onUnmounted(() => {
                         {{
                           Number(
                             result.mean_rating || result.raw_average || 0
-                          ).toFixed(1)
+                          ).toFixed(2)
                         }}/{{ eventMaxScore }}
                       </span>
                     </td>

@@ -20,7 +20,6 @@ export default {
     CurrentCandidateCard,
     ScoreInputForm,
     TemporaryScoreCard,
-    DarkModeToggle,
   },
   data() {
     return {
@@ -52,7 +51,6 @@ export default {
   },
   computed: {
     isDarkMode() {
-      // This is always reactive with Pinia!
       return this.darkModeStore.isDarkMode;
     },
   },
@@ -111,7 +109,7 @@ export default {
   },
   methods: {
     toggleDarkMode() {
-      useDarkModeStore().toggle();
+      this.darkModeStore.toggle();
     },
     initializeDarkMode() {
       useDarkModeStore().initializeDarkMode();
@@ -631,7 +629,21 @@ export default {
             </div>
 
             <!-- Dark Mode Toggle -->
-            <DarkModeToggle />
+            <button
+              @click="toggleDarkMode"
+              class="p-3 rounded-lg transition-all duration-300 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2"
+              :class="
+                isDarkMode
+                  ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400 focus:ring-yellow-400'
+                  : 'bg-gray-100 hover:bg-gray-200 text-orange-500 focus:ring-blue-500'
+              "
+              aria-label="Toggle dark mode"
+            >
+              <i
+                class="text-lg transition-transform duration-300"
+                :class="isDarkMode ? 'fas fa-moon' : 'fas fa-sun'"
+              ></i>
+            </button>
           </div>
         </div>
       </div>
@@ -872,6 +884,159 @@ export default {
               </div>
             </div>
           </template>
+        </div>
+      </div>
+    </div>
+    <!-- Score Confirmation Modal -->
+    <div
+      v-if="showConfirmModal"
+      class="fixed inset-0 bg-black bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+    >
+      <div
+        class="rounded-xl shadow-2xl w-full max-w-md transition-all duration-300 border"
+        :class="
+          isDarkMode
+            ? 'bg-gray-800 border-gray-700'
+            : 'bg-white border-gray-200'
+        "
+      >
+        <!-- Modal Header -->
+        <div
+          class="p-6 border-b"
+          :class="isDarkMode ? 'border-gray-700' : 'border-gray-200'"
+        >
+          <h3
+            class="text-xl font-bold flex items-center transition-colors"
+            :class="isDarkMode ? 'text-white' : 'text-gray-800'"
+          >
+            <i
+              class="fas fa-check-circle mr-2 transition-colors"
+              :class="isDarkMode ? 'text-blue-400' : 'text-blue-600'"
+            ></i>
+            Confirm Your Score
+          </h3>
+        </div>
+
+        <!-- Modal Body -->
+        <div class="p-6">
+          <p
+            class="mb-4 transition-colors"
+            :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+          >
+            Are you sure you want to confirm this score? Once confirmed, it
+            cannot be changed.
+          </p>
+
+          <!-- Score Summary -->
+          <div
+            class="rounded-lg p-4 mb-4 border transition-colors"
+            :class="
+              isDarkMode
+                ? 'bg-gray-700 border-gray-600'
+                : 'bg-gray-50 border-gray-200'
+            "
+          >
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <div
+                  class="text-sm font-medium mb-1 transition-colors"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                >
+                  Score:
+                </div>
+                <div
+                  class="text-2xl font-bold transition-colors"
+                  :class="isDarkMode ? 'text-blue-300' : 'text-blue-600'"
+                >
+                  {{ score }}<span class="text-sm">/{{ maxScore }}</span>
+                </div>
+              </div>
+              <div>
+                <div
+                  class="text-sm font-medium mb-1 transition-colors"
+                  :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
+                >
+                  Comments:
+                </div>
+                <div
+                  class="text-sm transition-colors"
+                  :class="isDarkMode ? 'text-gray-100' : 'text-gray-700'"
+                >
+                  {{ comments || "No comments" }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Candidate Info -->
+          <div
+            class="text-sm transition-colors"
+            :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+          >
+            <strong>Candidate:</strong> {{ next_candidate?.first_name }}
+            {{ next_candidate?.last_name }}
+            <br />
+            <strong>Category:</strong> {{ current_category?.category_name }}
+          </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div
+          class="px-6 py-4 border-t flex justify-end space-x-3"
+          :class="
+            isDarkMode
+              ? 'border-gray-700 bg-gray-800'
+              : 'border-gray-200 bg-gray-50'
+          "
+        >
+          <button
+            @click="confirmScoreSubmission(false)"
+            class="px-4 py-2 rounded-lg font-medium transition-all duration-200 hover:scale-105"
+            :class="
+              isDarkMode
+                ? 'bg-gray-700 hover:bg-gray-600 text-gray-300 border border-gray-600'
+                : 'bg-gray-300 hover:bg-gray-400 text-gray-700'
+            "
+            :disabled="isSubmitting"
+          >
+            <i class="fas fa-times mr-1"></i>
+            Cancel
+          </button>
+          <button
+            @click="confirmScoreSubmission(true)"
+            class="px-6 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center hover:scale-105 shadow-lg"
+            :class="
+              isDarkMode
+                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-900/20'
+                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/20'
+            "
+            :disabled="isSubmitting"
+          >
+            <span v-if="isSubmitting" class="mr-2">
+              <svg
+                class="animate-spin h-4 w-4 text-white"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                ></circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+            </span>
+            <i v-else class="fas fa-check mr-2"></i>
+            {{ isSubmitting ? "Confirming..." : "Confirm Score" }}
+          </button>
         </div>
       </div>
     </div>
