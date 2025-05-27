@@ -33,7 +33,7 @@ export const showError = (message, options = {}) => {
   );
 
   // Let auth errors through only if they're from login pages
-  const isOnLoginPage = window.location.pathname.includes("/login");
+  const isOnLoginPage = window.location.pathname.includes("/login/admin");
 
   if (isAuthError && !isOnLoginPage) {
     console.info("Suppressing auth error toast (not on login page):", message);
