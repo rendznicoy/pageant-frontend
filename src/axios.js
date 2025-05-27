@@ -81,36 +81,91 @@ axiosClient.interceptors.request.use(async (config) => {
   return config;
 });
 
+// Add this global auth error handler
+let isHandlingAuthError = false;
+
+const handleAuthError = () => {
+  if (isHandlingAuthError) return; // Prevent multiple simultaneous calls
+  isHandlingAuthError = true;
+
+  console.info("Authentication error - clearing all auth data");
+
+  // Clear all authentication data
+  localStorage.removeItem("token");
+  localStorage.removeItem("judgeSession");
+  delete axiosClient.defaults.headers.common["Authorization"];
+
+  // Clear user store if available (dynamic import to avoid circular dependency)
+  import("@/stores/user")
+    .then(({ useUserStore }) => {
+      const userStore = useUserStore();
+      userStore.handleAuthError();
+    })
+    .catch(() => {
+      console.warn("Could not access user store");
+    });
+
+  // Redirect to appropriate login page
+  const currentPath = window.location.pathname;
+  if (currentPath.includes("/judge/")) {
+    router.push("/login/judge").finally(() => {
+      isHandlingAuthError = false;
+    });
+  } else {
+    router.push("/login/admin").finally(() => {
+      isHandlingAuthError = false;
+    });
+  }
+};
+
 axiosClient.interceptors.response.use(
   (response) => {
     const contentType = response.headers?.["content-type"] ?? "";
 
-    // Handle blob responses (PDFs, CSV, etc.)
+    // Allow raw blob responses to pass through
     if (
       contentType.includes("application/octet-stream") ||
       contentType.includes("text/csv") ||
-      contentType.includes("application/pdf") || // Add this line
-      response.config?.responseType === "blob" // Add this line
+      contentType.includes("application/pdf") ||
+      response.config?.responseType === "blob"
     ) {
-      return response; // Return full response for downloads/blobs
+      return response;
     }
 
-    return response.data; // Default for API responses
+    return response.data;
   },
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("judgeSession");
-      router.push({ name: "Login" });
-      return Promise.resolve();
+    // Handle authentication errors globally
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      // Skip auth error handling for login endpoints
+      const isLoginEndpoint =
+        error.config?.url?.includes("/login") ||
+        error.config?.url?.includes("/csrf-cookie");
+
+      if (!isLoginEndpoint) {
+        console.info(
+          "Auth error detected - user account may have been deleted"
+        );
+        handleAuthError();
+        return Promise.reject(
+          new Error("Authentication failed - redirecting to login")
+        );
+      }
     }
 
-    console.error("API error", {
-      url: error.config?.url,
-      status: error.response?.status,
-      message: error.response?.data?.message || error.message,
-    });
+    // Handle 404 for user endpoints (account deleted)
+    if (
+      error.response?.status === 404 &&
+      error.config?.url?.includes("/api/v1/user")
+    ) {
+      console.info("User account not found - likely deleted");
+      handleAuthError();
+      return Promise.reject(
+        new Error("User account not found - redirecting to login")
+      );
+    }
 
+    // Let all other errors bubble up to component-level try/catch
     return Promise.reject(error);
   }
 );

@@ -330,7 +330,7 @@ onUnmounted(() => {
         <!-- Keep existing footer content -->
         <div class="sidebar-footer-content">
           <div class="app-branding">
-            <img src="/logoFI.png" alt="App Logo" class="app-logo" />
+            <img src="/MMVSU.png" alt="App Logo" class="app-logo" />
             <div class="app-info">
               <p class="app-title">Pageant Scoring</p>
               <p class="app-subtitle">Visayas State University</p>

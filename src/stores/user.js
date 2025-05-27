@@ -10,12 +10,26 @@ export const useUserStore = defineStore("user", () => {
 
   const isAuthenticated = computed(() => !!user.value);
 
-  const fetchUser = async () => {
+  // Add method to handle authentication errors
+  const handleAuthError = () => {
+    console.info("Authentication error - clearing user state");
+    user.value = null;
+    userId.value = null;
+    judgeId.value = null;
+    isFetching.value = false;
+    // Don't clear localStorage here as axios interceptor handles it
+  };
+
+  const fetchUser = async (suppressErrors = false) => {
     if (user.value || isFetching.value) return !!user.value;
 
     isFetching.value = true;
     try {
-      await axiosClient.get("/api/csrf-cookie");
+      // Skip CSRF for judge sessions
+      if (localStorage.getItem("judgeSession") !== "true") {
+        await axiosClient.get("/api/csrf-cookie");
+      }
+
       const res = await axiosClient.get("/api/v1/user");
 
       // Handle different response formats
@@ -30,16 +44,44 @@ export const useUserStore = defineStore("user", () => {
         judgeId.value = res.data.judge_id || null;
         return true;
       } else {
-        console.warn("User response format unexpected:", res);
+        if (!suppressErrors) {
+          console.warn("User response format unexpected:", res);
+        }
+        handleAuthError();
         return false;
       }
     } catch (err) {
-      if (err.response && err.response.status === 401) {
-        console.info("Unauthorized access");
-      } else {
-        console.error("Error fetching user:", err);
+      // Auth errors are now handled by axios interceptor
+      if (
+        err.message?.includes("Authentication failed") ||
+        err.message?.includes("User account not found")
+      ) {
+        // Already handled by interceptor
+        return false;
       }
-      return false;
+
+      if (
+        err.response &&
+        (err.response.status === 401 || err.response.status === 403)
+      ) {
+        if (!suppressErrors) {
+          console.info("User account no longer exists or unauthorized access");
+        }
+        handleAuthError();
+        return false;
+      } else if (err.response && err.response.status === 404) {
+        if (!suppressErrors) {
+          console.info("User account not found - likely deleted");
+        }
+        handleAuthError();
+        return false;
+      } else {
+        // Other errors - don't clear auth state for network issues
+        if (!suppressErrors) {
+          console.error("Error fetching user:", err);
+        }
+        return false;
+      }
     } finally {
       isFetching.value = false;
     }
@@ -69,16 +111,21 @@ export const useUserStore = defineStore("user", () => {
       // Continue with local cleanup even if API call fails
     } finally {
       // Always clear local state
-      user.value = null;
-      userId.value = null;
-      judgeId.value = null;
+      handleAuthError();
 
-      // Clear any stored tokens/session data
+      // Clear localStorage and axios headers
       localStorage.removeItem("token");
       localStorage.removeItem("judgeSession");
+      delete axiosClient.defaults.headers.common["Authorization"];
 
-      return true; // Always return true to indicate local cleanup is done
+      return true;
     }
+  };
+
+  // Method to check if user is still valid (useful for periodic checks)
+  const validateUser = async () => {
+    if (!user.value) return false;
+    return await fetchUser(true); // suppressErrors = true for silent validation
   };
 
   return {
@@ -90,5 +137,7 @@ export const useUserStore = defineStore("user", () => {
     setUser,
     setJudgeId,
     logout,
+    handleAuthError,
+    validateUser,
   };
 });

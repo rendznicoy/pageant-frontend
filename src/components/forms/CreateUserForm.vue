@@ -384,7 +384,7 @@ const isSubmitDisabled = computed(() => {
             "
             :disabled="isSubmitDisabled"
           >
-            Create User
+            {{ isSubmitDisabled ? "Processing..." : "Create User" }}
           </button>
         </div>
       </form>

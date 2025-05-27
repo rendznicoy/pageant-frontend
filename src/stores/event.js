@@ -1,3 +1,4 @@
+// event.js
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import axiosClient from "@/axios";

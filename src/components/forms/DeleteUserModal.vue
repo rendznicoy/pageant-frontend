@@ -1,10 +1,8 @@
 <script setup>
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useDarkModeStore } from "@/stores/darkMode";
 
 const darkModeStore = useDarkModeStore();
-
-// Reactive dark mode - CRITICAL: This is what was missing
 const isDarkMode = computed(() => darkModeStore.isDarkMode);
 
 const props = defineProps({
@@ -15,6 +13,10 @@ const props = defineProps({
 });
 
 const emit = defineEmits(["confirm", "cancel"]);
+
+// NEW: Submission state exposed to parent
+const isSubmitting = ref(false);
+defineExpose({ isSubmitting });
 </script>
 
 <template>
@@ -68,14 +70,15 @@ const emit = defineEmits(["confirm", "cancel"]);
         </button>
         <button
           @click="emit('confirm')"
-          class="px-4 py-2 text-white rounded-md transition-colors duration-200"
+          :disabled="isSubmitting"
+          class="px-4 py-2 text-white rounded-md transition-colors duration-200 disabled:opacity-50"
           :class="
             isDarkMode
               ? 'bg-red-700 hover:bg-red-600'
               : 'bg-red-600 hover:bg-red-700'
           "
         >
-          Delete
+          {{ isSubmitting ? "Processing..." : "Delete User" }}
         </button>
       </div>
     </div>

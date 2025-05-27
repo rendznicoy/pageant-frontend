@@ -200,7 +200,7 @@ watch([() => data.value.username, () => data.value.password], () => {
         <a href="/">
           <img
             class="h-20 mb-8 w-auto"
-            src="/logoFI.png"
+            src="/MMVSU.png"
             alt="Visayas State University Logo"
           />
         </a>
@@ -360,7 +360,6 @@ watch([() => data.value.username, () => data.value.password], () => {
       >
         <img class="h-5 w-5 mr-3" src="/google24bg.png" alt="Google Logo" />
         <span class="font-medium">Sign in with Google</span>
-        <span class="ml-1 text-green-700">(@vsu.edu.ph)</span>
       </button>
 
       <!-- Judge Login -->

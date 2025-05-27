@@ -30,6 +30,16 @@ const isDarkMode = computed(() => darkModeStore.isDarkMode);
 const currentUser = computed(() => userStore.user);
 const isAuthenticated = computed(() => userStore.isAuthenticated);
 
+// Add this computed property to check if user is admin/tabulator only
+const shouldShowFullNavbar = computed(() => {
+  return (
+    isAuthenticated.value &&
+    currentUser.value &&
+    ["admin", "tabulator"].includes(currentUser.value.role)
+  );
+});
+
+// Rest of your existing methods...
 const toggleSidebar = () => {
   sidebar.toggle();
 };
@@ -48,28 +58,23 @@ const closeUserMenu = () => {
   showUserMenu.value = false;
 };
 
-// Fixed logout function with proper redirection
 const handleLogout = async () => {
   try {
     const success = await userStore.logout();
     if (success) {
       closeUserMenu();
-      // Clear any stored session data
       localStorage.removeItem("token");
       localStorage.removeItem("judgeSession");
-      // Redirect to login page
       await router.push("/login/admin");
     }
   } catch (error) {
     console.error("Logout failed:", error);
-    // Force redirect even if logout fails
     closeUserMenu();
     localStorage.clear();
     await router.push("/login/admin");
   }
 };
 
-// Close user menu when clicking outside
 const handleClickOutside = (event) => {
   const userMenuElement = document.querySelector(".user-menu");
   if (userMenuElement && !userMenuElement.contains(event.target)) {
@@ -85,7 +90,6 @@ onUnmounted(() => {
   document.removeEventListener("click", handleClickOutside);
 });
 
-// Event status badge color
 const eventStatusColor = computed(() => {
   switch (props.eventStatus) {
     case "active":
@@ -101,7 +105,9 @@ const eventStatusColor = computed(() => {
 </script>
 
 <template>
+  <!-- Only show full navbar for admin/tabulator users -->
   <nav
+    v-if="shouldShowFullNavbar"
     class="fixed top-0 left-0 right-0 z-50 border-b shadow-lg transition-all duration-300"
     :class="
       isDarkMode
@@ -113,9 +119,8 @@ const eventStatusColor = computed(() => {
       <div class="flex items-center justify-between h-16">
         <!-- Left Section -->
         <div class="flex items-center space-x-4">
-          <!-- Burger Menu - Only show when authenticated -->
+          <!-- Burger Menu -->
           <button
-            v-if="isAuthenticated"
             @click="toggleSidebar"
             class="navbar-burger-btn"
             aria-label="Toggle Sidebar"
@@ -129,13 +134,9 @@ const eventStatusColor = computed(() => {
             </div>
           </button>
 
-          <!-- Logo/Brand - Always visible -->
+          <!-- Logo/Brand -->
           <div class="flex items-center space-x-3">
-            <img
-              src="/logoFI.png"
-              alt="PSV Logo"
-              class="h-8 w-8 rounded-full"
-            />
+            <img src="/MMVSU.png" alt="PSV Logo" class="h-8 w-8 rounded-full" />
             <h1
               class="text-xl font-bold hidden sm:block"
               :class="isDarkMode ? 'text-white ' : 'text-white '"
@@ -144,9 +145,9 @@ const eventStatusColor = computed(() => {
             </h1>
           </div>
 
-          <!-- Event Status Badge - Only when authenticated -->
+          <!-- Event Status Badge -->
           <div
-            v-if="isAuthenticated && eventStatus && eventStatus !== 'inactive'"
+            v-if="eventStatus && eventStatus !== 'inactive'"
             class="hidden md:flex items-center space-x-2"
           >
             <span class="event-status-badge" :class="eventStatusColor">
@@ -156,11 +157,8 @@ const eventStatusColor = computed(() => {
           </div>
         </div>
 
-        <!-- Center Section - Navigation Links - Only when authenticated -->
-        <div
-          v-if="isAuthenticated"
-          class="hidden lg:flex items-center space-x-2"
-        >
+        <!-- Center Section - Navigation Links -->
+        <div class="hidden lg:flex items-center space-x-2">
           <router-link
             v-for="link in navigationLinks.slice(0, 5)"
             :key="link.path"
@@ -175,7 +173,7 @@ const eventStatusColor = computed(() => {
 
         <!-- Right Section -->
         <div class="flex items-center space-x-4">
-          <!-- Refresh Button - Always visible -->
+          <!-- Refresh Button -->
           <button
             @click="handleRefreshDashboard"
             :disabled="isRefreshing"
@@ -185,11 +183,11 @@ const eventStatusColor = computed(() => {
             <i class="fas fa-sync-alt text-sm"></i>
           </button>
 
-          <!-- Dark Mode Toggle - Always visible -->
+          <!-- Dark Mode Toggle -->
           <DarkModeToggle />
 
-          <!-- User Menu - Only when authenticated -->
-          <div v-if="isAuthenticated" class="relative user-menu">
+          <!-- User Menu -->
+          <div class="relative user-menu">
             <button @click="toggleUserMenu" class="user-menu-btn">
               <img
                 :src="currentUser?.profile_photo || '/user24.png'"
@@ -253,6 +251,37 @@ const eventStatusColor = computed(() => {
               </div>
             </transition>
           </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Minimal navbar for unauthenticated users or when shouldShowFullNavbar is false -->
+  <nav
+    v-else
+    class="fixed top-0 left-0 right-0 z-50 border-b shadow-lg transition-all duration-300"
+    :class="
+      isDarkMode
+        ? 'bg-gray-900 border-gray-700'
+        : 'bg-green-900 border-green-800'
+    "
+  >
+    <div class="px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <!-- Left Section - Logo only -->
+        <div class="flex items-center space-x-3">
+          <img src="/MMVSU.png" alt="PSV Logo" class="h-8 w-8 rounded-full" />
+          <h1
+            class="text-xl font-bold hidden sm:block"
+            :class="isDarkMode ? 'text-white ' : 'text-white '"
+          >
+            Pageant Scoring
+          </h1>
+        </div>
+
+        <!-- Right Section - Only Dark Mode Toggle -->
+        <div class="flex items-center space-x-4">
+          <DarkModeToggle />
         </div>
       </div>
     </div>

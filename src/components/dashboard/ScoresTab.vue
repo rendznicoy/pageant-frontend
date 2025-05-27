@@ -376,7 +376,11 @@ const availableStages = computed(() => {
 
 const exportScores = async () => {
   if (!scores.value.length) {
-    toast.info("No scores to export.");
+    toast.warning("No scores available yet. Cannot export CSV.", {
+      timeout: 4000,
+      position: "top-right",
+      icon: "fas fa-exclamation-triangle",
+    });
     return;
   }
 
@@ -489,7 +493,7 @@ onUnmounted(() => {
                 ? 'bg-green-700 hover:bg-green-600 text-green-100'
                 : 'bg-green-600 text-white hover:bg-green-700'
             "
-            :disabled="loading || !scores.length"
+            :disabled="loading || !filteredScores.length"
           >
             <i class="fas fa-download"></i>
             {{ loading ? "Exporting..." : "Export CSV" }}
@@ -675,7 +679,7 @@ onUnmounted(() => {
 
     <!-- Auto-refresh indicator -->
     <div
-      class="flex items-center text-sm transition-colors"
+      class="flex items-center text-sm transition-colors ml-2"
       :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
     >
       <i class="fas fa-sync-alt fa-spin mr-2 opacity-50"></i>

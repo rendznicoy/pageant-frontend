@@ -38,6 +38,8 @@ const form = reactive({
   end_date: "",
   cover_photo: null,
   preview_url: "",
+  statisticians: [], // <-- add this
+  manual_statisticians: [], // <-- and this
 });
 
 const allEligibleUsers = ref([]);
@@ -166,6 +168,12 @@ async function submit() {
     }
     if (form.cover_photo instanceof File) {
       formData.append("cover_photo", form.cover_photo);
+    }
+    if (props.event?.statisticians) {
+      formData.append(
+        "statisticians",
+        JSON.stringify(props.event?.statisticians ?? [])
+      );
     }
 
     const response = await store.updateEvent(props.event.event_id, formData);
@@ -335,6 +343,18 @@ watch(
       ? getImageUrl(newEvent.cover_photo)
       : "";
     form.cover_photo = null;
+    form.statisticians = [];
+    form.manual_statisticians = [];
+
+    if (props.event?.statisticians) {
+      props.event.statisticians.forEach((stat) => {
+        if (stat.id) {
+          form.statisticians.push(stat.id); // assuming `user_id`
+        } else {
+          form.manual_statisticians.push(stat.name);
+        }
+      });
+    }
   },
   { immediate: true }
 );

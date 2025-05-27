@@ -14,6 +14,115 @@ import axiosClient from "@/axios";
 import Pusher from "pusher-js";
 import { useRouter } from "vue-router";
 
+let pusher = null;
+let channel = null;
+
+const router = useRouter();
+const toast = useToast();
+const stages = ref([]);
+const candidates = ref([]);
+const loading = ref(false);
+const selectedStage = ref(null);
+const selectedCategory = ref(null);
+const currentCandidateId = ref(null);
+const topCandidatesCount = ref(null);
+const showTopCandidatesModal = ref(false);
+const showConfirmSelectModal = ref(false);
+const showConfirmResetModal = ref(false);
+const pendingScoresMap = ref({});
+const hasSelectedTopCandidates = ref({});
+const eventMaxScore = ref(100);
+const stageLoading = ref({});
+const categoryLoading = ref({});
+const candidateLoading = ref({});
+const topCandidatesLoading = ref(false);
+const showCandidateModal = ref(false);
+const selectedCategoryForCandidate = ref(null);
+const candidateSearchTerm = ref("");
+const showCandidateConfirmModal = ref(false);
+const selectedCandidateForConfirmation = ref(null);
+const previewUrl = ref(null);
+const showPreview = ref(false);
+
+const closePreview = () => {
+  if (previewUrl.value) {
+    window.URL.revokeObjectURL(previewUrl.value);
+    previewUrl.value = null;
+  }
+  showPreview.value = false;
+};
+
+// Enhanced candidate selection function
+const selectCandidateFromModal = async (candidateId) => {
+  const candidate = candidates.value.find(
+    (c) => c.candidate_id === candidateId
+  );
+  selectedCandidateForConfirmation.value = {
+    candidate,
+    categoryId: selectedCategoryForCandidate.value.id,
+    categoryName: selectedCategoryForCandidate.value.name,
+  };
+  showCandidateConfirmModal.value = true;
+};
+
+// Filtered candidates for search
+const filteredCandidatesForSelection = computed(() => {
+  if (!selectedCategoryForCandidate.value) return [];
+
+  const available = getAvailableCandidates(
+    selectedCategoryForCandidate.value.id
+  );
+
+  if (!candidateSearchTerm.value) return available;
+
+  const searchLower = candidateSearchTerm.value.toLowerCase();
+  return available.filter(
+    (candidate) =>
+      candidate.first_name.toLowerCase().includes(searchLower) ||
+      candidate.last_name.toLowerCase().includes(searchLower) ||
+      candidate.candidate_number.toString().includes(searchLower) ||
+      candidate.team?.toLowerCase().includes(searchLower)
+  );
+});
+
+// Function to open candidate selection modal
+const openCandidateSelection = (category) => {
+  selectedCategoryForCandidate.value = category;
+  candidateSearchTerm.value = "";
+  showCandidateModal.value = true;
+};
+
+const setButtonLoading = (element, isLoading, originalText, loadingText) => {
+  if (isLoading) {
+    element.disabled = true;
+    element.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>${loadingText}`;
+  } else {
+    element.disabled = false;
+    element.innerHTML = originalText;
+  }
+};
+
+const formatScore = (score) => {
+  const numScore = parseFloat(score || 0);
+  return numScore.toFixed(2);
+};
+
+const formatMeanRating = (rating) => {
+  const numRating = parseFloat(rating || 0);
+  return numRating.toFixed(2);
+};
+
+const formatMeanRank = (rank) => {
+  const numRank = parseFloat(rank || 0);
+  return numRank.toFixed(2);
+};
+
+const partialResults = ref([]);
+
+const activePartialResults = computed(() =>
+  partialResults.value.filter((c) => c.candidate?.is_active || c.is_active)
+);
+
 const enhancedScoringTooltipContent = `
 Enhanced Scoring Process:
 - Mean Rating: Average of all judges' scores
@@ -85,26 +194,6 @@ const props = defineProps({
     required: true,
   },
 });
-
-const router = useRouter();
-const toast = useToast();
-const stages = ref([]);
-const candidates = ref([]);
-const loading = ref(false);
-const selectedStage = ref(null);
-const selectedCategory = ref(null);
-const currentCandidateId = ref(null);
-const topCandidatesCount = ref(null);
-const partialResults = ref([]);
-const showTopCandidatesModal = ref(false);
-const showConfirmSelectModal = ref(false);
-const showConfirmResetModal = ref(false);
-const pendingScoresMap = ref({});
-const hasSelectedTopCandidates = ref({});
-const eventMaxScore = ref(100);
-
-let pusher = null;
-let channel = null;
 
 const hasPending = (categoryId) => {
   const key = String(categoryId);
@@ -224,34 +313,26 @@ const fetchCandidates = async () => {
   }
 };
 
-const fetchPartialResults = async (stageId) => {
+const fetchPartialResults = async (stageId, showToasts = true) => {
   loading.value = true;
   try {
-    console.log("→ Calling partial-results for stage", stageId);
+    console.log("→ Calling partial-results-active for stage", stageId);
 
-    // 1. Call the endpoint
     const response = await axiosClient.get(
-      `/api/v1/events/${props.eventId}/stages/${stageId}/partial-results`
+      `/api/v1/events/${props.eventId}/stages/${stageId}/partial-results-active`
     );
 
-    // 2. Inspect what you actually got back
-    console.log("← Raw response object:", response);
-
-    // 3. Figure out where `candidates` lives
     const payload =
       response && typeof response === "object"
-        ? // if there's a .candidates on the root, use it, otherwise look under .data
-          "candidates" in response
+        ? "candidates" in response
           ? response
           : response.data || {}
         : {};
 
-    // 4. Pull out the array (or fall back to empty)
     const rawCandidates = Array.isArray(payload.candidates)
       ? payload.candidates
       : [];
 
-    // 5. Normalize and set your ref
     partialResults.value = rawCandidates.map((c) => ({
       ...c,
       sex:
@@ -264,13 +345,6 @@ const fetchPartialResults = async (stageId) => {
 
     console.log("⤷ Parsed partialResults:", partialResults.value);
 
-    // 6. Notify if *really* empty
-    if (!partialResults.value.length) {
-      console.warn("No partial results returned for stage:", stageId);
-      toast.info("No confirmed scores available for this stage yet.");
-    }
-
-    // 7. Force a re-render
     await nextTick();
   } catch (error) {
     handleError(error, "Failed to load partial results");
@@ -281,15 +355,63 @@ const fetchPartialResults = async (stageId) => {
 };
 
 // Redirect to Results Tab for final results
-const viewFinalResults = (stageId) => {
-  router.push({
-    path: "/scores",
-    query: { eventId: props.eventId, stageId },
-  });
+const viewFinalResults = async (stageId) => {
+  // Check if there are results to preview
+  if (!partialResults.value.length) {
+    toast.info("No results to preview.");
+    return;
+  }
+
+  loading.value = true;
+  try {
+    const response = await axiosClient.get(
+      `/api/v1/events/${props.eventId}/results/preview`,
+      {
+        responseType: "blob",
+      }
+    );
+
+    console.log("Preview response:", response); // Debug log
+
+    // Handle the blob response - axios interceptor returns full response for blobs
+    let blob;
+    if (response.data && response.data instanceof Blob) {
+      blob = response.data;
+    } else if (response instanceof Blob) {
+      blob = response;
+    } else {
+      console.error("Unexpected response format:", response);
+      throw new Error("Invalid response format for PDF preview");
+    }
+
+    // Verify blob has content and correct type
+    console.log("Blob size:", blob.size, "Blob type:", blob.type); // Debug log
+
+    if (blob.size === 0) {
+      throw new Error("Received empty PDF file");
+    }
+
+    // Force PDF mime type if not set
+    if (!blob.type || blob.type === "application/octet-stream") {
+      blob = new Blob([blob], { type: "application/pdf" });
+    }
+
+    previewUrl.value = window.URL.createObjectURL(blob);
+    showPreview.value = true;
+  } catch (error) {
+    console.error("Preview error:", error);
+    handleError(
+      error,
+      error.response?.data?.message ||
+        "Failed to preview report: " + error.message
+    );
+  } finally {
+    loading.value = false;
+  }
 };
 
 const startStage = async (stageId) => {
-  loading.value = true;
+  stageLoading.value[stageId] = "starting";
   try {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/stages/${stageId}/start`
@@ -299,16 +421,16 @@ const startStage = async (stageId) => {
     toast.success(msg);
 
     await fetchStages();
-    await fetchPartialResults(stageId);
+    await fetchPartialResults(stageId, false);
   } catch (error) {
     handleError(error, "Failed to start stage");
   } finally {
-    loading.value = false;
+    delete stageLoading.value[stageId];
   }
 };
 
 const resetStage = async (stageId) => {
-  loading.value = true;
+  stageLoading.value[stageId] = "resetting";
   try {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/stages/${stageId}/reset`
@@ -322,28 +444,28 @@ const resetStage = async (stageId) => {
   } catch (error) {
     handleError(error, "Failed to reset stage");
   } finally {
-    loading.value = false;
+    delete stageLoading.value[stageId];
   }
 };
 
 const finalizeStage = async (stageId) => {
-  loading.value = true;
+  stageLoading.value[stageId] = "finalizing";
   try {
     await axiosClient.post(
       `/api/v1/events/${props.eventId}/stages/${stageId}/finalize`
     );
     toast.success("Stage finalized successfully!");
     await fetchStages();
-    await fetchPartialResults(stageId);
+    await fetchPartialResults(stageId, false);
   } catch (error) {
     handleError(error, "Failed to finalize stage");
   } finally {
-    loading.value = false;
+    delete stageLoading.value[stageId];
   }
 };
 
 const startCategory = async (categoryId) => {
-  loading.value = true;
+  categoryLoading.value[categoryId] = "starting";
   try {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${categoryId}/start`
@@ -355,12 +477,12 @@ const startCategory = async (categoryId) => {
   } catch (error) {
     handleError(error, "Failed to start category");
   } finally {
-    loading.value = false;
+    delete categoryLoading.value[categoryId];
   }
 };
 
 const resetCategory = async (categoryId) => {
-  loading.value = true;
+  categoryLoading.value[categoryId] = "resetting";
   try {
     const response = await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${categoryId}/reset`
@@ -368,11 +490,15 @@ const resetCategory = async (categoryId) => {
 
     const msg = response?.data?.message || "Category reset successfully!";
     toast.success(msg);
+
+    // Clear scored candidates cache for this category
+    clearScoredCandidatesCache(categoryId);
+
     await fetchStages();
   } catch (error) {
     handleError(error, "Failed to reset category");
   } finally {
-    loading.value = false;
+    delete categoryLoading.value[categoryId];
   }
 };
 
@@ -413,7 +539,10 @@ const setCandidate = debounce(async (categoryId, candidateId) => {
     toast.success(response?.data?.message || "Candidate set successfully!");
     currentCandidateId.value = candidateId;
 
-    await fetchStages(); // Only refresh if success
+    // Clear cache for this category when a new candidate is set
+    clearScoredCandidatesCache(categoryId);
+
+    await fetchStages();
   } catch (error) {
     category.current_candidate_id = previousCandidateId;
     handleError(error, "Failed to set candidate");
@@ -434,7 +563,7 @@ const onCandidateChange = async (category, newCandidateId) => {
 };
 
 const finalizeCategory = async (categoryId) => {
-  loading.value = true;
+  categoryLoading.value[categoryId] = "finalizing";
   try {
     await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${categoryId}/finalize`
@@ -449,7 +578,7 @@ const finalizeCategory = async (categoryId) => {
   } catch (error) {
     handleError(error, "Failed to finalize category");
   } finally {
-    loading.value = false;
+    delete categoryLoading.value[categoryId];
   }
 };
 
@@ -461,13 +590,30 @@ const selectTopCandidates = async () => {
   showConfirmSelectModal.value = true; // Show confirmation modal
 };
 
+const confirmCandidateSelection = async () => {
+  const { candidate, categoryId } = selectedCandidateForConfirmation.value;
+  candidateLoading.value[categoryId] = true;
+
+  try {
+    await setCandidate(categoryId, candidate.candidate_id);
+    showCandidateModal.value = false;
+    showCandidateConfirmModal.value = false;
+    selectedCategoryForCandidate.value = null;
+    selectedCandidateForConfirmation.value = null;
+  } catch (error) {
+    // Error already handled in setCandidate
+  } finally {
+    candidateLoading.value[categoryId] = false;
+  }
+};
+
 const confirmSelectTopCandidates = async () => {
   if (isStandardDivision.value) {
     // Standard division requires even numbers and equal male/female split
-    const males = partialResults.value.filter(
+    const males = activePartialResults.value.filter(
       (c) => c.sex?.toLowerCase() === "m" || c.sex?.toLowerCase() === "male"
     );
-    const females = partialResults.value.filter(
+    const females = activePartialResults.value.filter(
       (c) => c.sex?.toLowerCase() === "f" || c.sex?.toLowerCase() === "female"
     );
 
@@ -481,7 +627,7 @@ const confirmSelectTopCandidates = async () => {
     }
   } else {
     // Male-only or female-only division
-    const availableCandidates = partialResults.value.length;
+    const availableCandidates = activePartialResults.value.length;
     if (availableCandidates < topCandidatesCount.value) {
       toast.error(
         `Not enough candidates. Only ${availableCandidates} candidates available with confirmed scores.`
@@ -494,9 +640,7 @@ const confirmSelectTopCandidates = async () => {
   try {
     await axiosClient.post(
       `/api/v1/events/${props.eventId}/stages/${selectedStage.value.id}/select-top-candidates`,
-      {
-        top_candidates_count: topCandidatesCount.value,
-      }
+      { top_candidates_count: topCandidatesCount.value }
     );
     toast.success("Top candidates selected successfully!");
     hasSelectedTopCandidates.value[selectedStage.value.id] = true;
@@ -504,6 +648,7 @@ const confirmSelectTopCandidates = async () => {
     showConfirmSelectModal.value = false;
     await fetchCandidates();
     await fetchStages();
+    await fetchPartialResults(selectedStage.value.id);
   } catch (error) {
     handleError(error, "Failed to select top candidates");
   } finally {
@@ -527,6 +672,7 @@ const confirmResetTopCandidates = async () => {
     topCandidatesCount.value = null; // Clear input
     await fetchCandidates();
     await fetchStages();
+    await fetchPartialResults(selectedStage.value.id);
   } catch (error) {
     handleError(error, "Failed to reset top candidates.");
   } finally {
@@ -688,10 +834,6 @@ const getAvailableCandidates = (categoryId) => {
       return true;
     }
 
-    // Check if this candidate has been fully scored in this category
-    // (This would require an API call to check if all judges have confirmed scores)
-    // For now, we'll use a simplified check
-
     // Check if this candidate is currently being used in any OTHER active category
     const isCurrentlyUsedElsewhere = stages.value
       .flatMap((stage) => stage.categories)
@@ -702,9 +844,37 @@ const getAvailableCandidates = (categoryId) => {
           cat.current_candidate_id === candidate.candidate_id // Candidate is set
       );
 
-    // Exclude candidates currently being used in other active categories
-    return !isCurrentlyUsedElsewhere;
+    if (isCurrentlyUsedElsewhere) {
+      return false;
+    }
+
+    // NEW: Exclude candidates who have been fully scored in this category
+    // Simple logic: if category is active/finalized and candidate is not current,
+    // check if they might have been processed already
+    if (category.status !== "pending") {
+      const key = `${categoryId}-${candidate.candidate_id}`;
+      const isScored = scoredCandidatesMap.value[key];
+      if (isScored) {
+        return false;
+      }
+    }
+
+    return true;
   });
+};
+
+const clearScoredCandidatesCache = (categoryId = null) => {
+  if (categoryId) {
+    // Clear cache for specific category
+    Object.keys(scoredCandidatesMap.value).forEach((key) => {
+      if (key.startsWith(`${categoryId}-`)) {
+        delete scoredCandidatesMap.value[key];
+      }
+    });
+  } else {
+    // Clear entire cache
+    scoredCandidatesMap.value = {};
+  }
 };
 
 const getCandidateDisplayText = (candidate, categoryId) => {
@@ -715,6 +885,42 @@ const getCandidateDisplayText = (candidate, categoryId) => {
   }
 
   return baseText;
+};
+
+const scoredCandidatesMap = ref({});
+
+const isCandidateFullyScored = async (categoryId, candidateId) => {
+  const key = `${categoryId}-${candidateId}`;
+
+  // Check our cache first
+  if (scoredCandidatesMap.value[key] !== undefined) {
+    return scoredCandidatesMap.value[key];
+  }
+
+  try {
+    // You could make an API call here to check if all judges have confirmed scores
+    // for this candidate in this category. For now, we'll use a simpler approach.
+    const category = stages.value
+      .flatMap((stage) => stage.categories)
+      .find((c) => c.id === categoryId);
+
+    if (!category) return false;
+
+    // If the category has moved to a different candidate or is finalized,
+    // and this isn't the current candidate, assume it's been scored
+    const isScored =
+      category.status === "finalized" ||
+      (category.current_candidate_id !== null &&
+        category.current_candidate_id !== candidateId &&
+        !hasPending(categoryId));
+
+    // Cache the result
+    scoredCandidatesMap.value[key] = isScored;
+    return isScored;
+  } catch (error) {
+    console.warn("Error checking if candidate is fully scored:", error);
+    return false;
+  }
 };
 
 const handleError = (
@@ -740,20 +946,74 @@ const hasActiveCategoryInStage = (stage) => {
   return stage.categories.some((cat) => cat.status === "active");
 };
 
-const maleResults = computed(() =>
-  partialResults.value.filter(
+const maleResults = computed(() => {
+  const results = partialResults.value.filter(
     (result) =>
       result.sex?.toLowerCase() === "m" || result.sex?.toLowerCase() === "male"
-  )
-);
+  );
 
-const femaleResults = computed(() =>
-  partialResults.value.filter(
+  // Sort and assign ranks within males only
+  const sorted = results.sort((a, b) => {
+    if (a.mean_rank !== b.mean_rank) {
+      return (a.mean_rank || 999) - (b.mean_rank || 999);
+    }
+    return (b.mean_rating || 0) - (a.mean_rating || 0);
+  });
+
+  return sorted.map((result, index) => ({
+    ...result,
+    rank: index + 1,
+  }));
+});
+
+const femaleResults = computed(() => {
+  const results = partialResults.value.filter(
     (result) =>
       result.sex?.toLowerCase() === "f" ||
       result.sex?.toLowerCase() === "female"
-  )
-);
+  );
+
+  // Sort and assign ranks within females only
+  const sorted = results.sort((a, b) => {
+    if (a.mean_rank !== b.mean_rank) {
+      return (a.mean_rank || 999) - (b.mean_rank || 999);
+    }
+    return (b.mean_rating || 0) - (a.mean_rating || 0);
+  });
+
+  return sorted.map((result, index) => ({
+    ...result,
+    rank: index + 1,
+  }));
+});
+
+const previewTopCandidates = async () => {
+  if (!topCandidatesCount.value || topCandidatesCount.value <= 0) {
+    toast.error("Please enter a valid number of top candidates.");
+    return;
+  }
+
+  loading.value = true;
+  try {
+    const response = await axiosClient.post(
+      `/api/v1/events/${props.eventId}/stages/${selectedStage.value.id}/preview-top-candidates`,
+      { top_candidates_count: topCandidatesCount.value }
+    );
+
+    const candidatesPreview = response?.data?.candidates || [];
+
+    if (!candidatesPreview.length) {
+      toast.info("No eligible candidates available for this preview.");
+    } else {
+      toast.success("Preview generated. Displayed below.");
+      partialResults.value = candidatesPreview;
+    }
+  } catch (error) {
+    handleError(error, "Failed to preview top candidates");
+  } finally {
+    loading.value = false;
+  }
+};
 
 onMounted(async () => {
   await fetchStages();
@@ -767,6 +1027,9 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (previewUrl.value) {
+    window.URL.revokeObjectURL(previewUrl.value);
+  }
   try {
     if (pusher && pusher.connection.state === "connected") {
       pusher.unsubscribe(`event.${props.eventId}`);
@@ -783,6 +1046,16 @@ watch(selectedStage, (newStage) => {
   fetchPartialResults(newStage.id);
 });
 
+watch(showTopCandidatesModal, async (isOpen) => {
+  if (isOpen && selectedStage.value?.id && topCandidatesCount.value) {
+    try {
+      await previewTopCandidates();
+    } catch (e) {
+      console.warn("Preview fetch failed:", e.message);
+    }
+  }
+});
+
 watchEffect(async () => {
   const activeStage = stages.value.find((s) => s.status === "active");
   if (activeStage && selectedStage.value?.id !== activeStage.id) {
@@ -793,7 +1066,6 @@ watchEffect(async () => {
 });
 </script>
 
-<
 <template>
   <div class="flex flex-col md:flex-row gap-6">
     <!-- Stage Management Section -->
@@ -822,31 +1094,58 @@ watchEffect(async () => {
                 ></i>
               </p>
             </div>
-            <div class="space-x-2">
+            <div class="flex flex-wrap gap-2">
               <button
                 v-if="stage.status === 'pending' && !hasActiveStage"
                 @click="startStage(stage.id)"
-                class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                :disabled="loading"
+                class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-all duration-200 disabled:opacity-50"
+                :disabled="stageLoading[stage.id]"
               >
-                Start Stage
+                <i
+                  v-if="stageLoading[stage.id] === 'starting'"
+                  class="fas fa-spinner fa-spin mr-2"
+                ></i>
+                <i v-else class="fas fa-play mr-2"></i>
+                {{
+                  stageLoading[stage.id] === "starting"
+                    ? "Starting..."
+                    : "Start Stage"
+                }}
               </button>
-              <button
-                v-if="stage.status === 'active'"
-                @click="resetStage(stage.id)"
-                class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-                :disabled="loading"
-              >
-                Reset Stage
-              </button>
-              <button
-                v-if="stage.status === 'active'"
-                @click="finalizeStage(stage.id)"
-                class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                :disabled="loading"
-              >
-                Finalize Stage
-              </button>
+              <div v-if="stage.status === 'active'" class="flex gap-2">
+                <button
+                  @click="resetStage(stage.id)"
+                  class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-all duration-200 disabled:opacity-50"
+                  :disabled="stageLoading[stage.id]"
+                >
+                  <i
+                    v-if="stageLoading[stage.id] === 'resetting'"
+                    class="fas fa-spinner fa-spin mr-2"
+                  ></i>
+                  <i v-else class="fas fa-undo mr-2"></i>
+                  {{
+                    stageLoading[stage.id] === "resetting"
+                      ? "Resetting..."
+                      : "Reset Stage"
+                  }}
+                </button>
+                <button
+                  @click="finalizeStage(stage.id)"
+                  class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-all duration-200 disabled:opacity-50"
+                  :disabled="stageLoading[stage.id]"
+                >
+                  <i
+                    v-if="stageLoading[stage.id] === 'finalizing'"
+                    class="fas fa-spinner fa-spin mr-2"
+                  ></i>
+                  <i v-else class="fas fa-check mr-2"></i>
+                  {{
+                    stageLoading[stage.id] === "finalizing"
+                      ? "Finalizing..."
+                      : "Finalize Stage"
+                  }}
+                </button>
+              </div>
               <button
                 v-if="stage.status === 'finalized'"
                 @click="
@@ -877,9 +1176,9 @@ watchEffect(async () => {
               <div
                 v-for="category in stage.categories"
                 :key="category.id"
-                class="flex justify-between items-center"
+                class="flex justify-between items-start gap-4"
               >
-                <div>
+                <div class="flex-1">
                   <p class="text-sm font-medium text-gray-900">
                     {{ category.name }}
                   </p>
@@ -910,110 +1209,190 @@ watchEffect(async () => {
                     }}
                   </p>
                 </div>
-                <div class="space-x-2">
-                  <button
-                    v-if="
-                      category.status === 'pending' &&
-                      stage.status === 'active' &&
-                      !hasActiveCategory
-                    "
-                    @click="startCategory(category.id)"
-                    class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
-                    :disabled="loading"
-                  >
-                    Start Category
-                  </button>
-                  <button
-                    v-if="category.status === 'active'"
-                    @click="resetCategory(category.id)"
-                    class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700"
-                    :disabled="loading"
-                  >
-                    Reset Category
-                  </button>
-                  <button
-                    v-if="category.status === 'active'"
-                    @click="finalizeCategory(category.id)"
-                    class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                    :disabled="loading"
-                  >
-                    Finalize Category
-                  </button>
+                <div class="flex flex-col gap-2 min-w-[320px]">
+                  <!-- Category Action Buttons Row -->
+                  <div class="flex gap-2">
+                    <button
+                      v-if="
+                        category.status === 'pending' &&
+                        stage.status === 'active' &&
+                        !hasActiveCategory
+                      "
+                      @click="startCategory(category.id)"
+                      class="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-all duration-200 disabled:opacity-50"
+                      :disabled="categoryLoading[category.id]"
+                    >
+                      <i
+                        v-if="categoryLoading[category.id] === 'starting'"
+                        class="fas fa-spinner fa-spin mr-2"
+                      ></i>
+                      <i v-else class="fas fa-play mr-2"></i>
+                      {{
+                        categoryLoading[category.id] === "starting"
+                          ? "Starting..."
+                          : "Start Category"
+                      }}
+                    </button>
+                    <div v-if="category.status === 'active'" class="flex gap-2">
+                      <button
+                        @click="resetCategory(category.id)"
+                        class="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-all duration-200 disabled:opacity-50"
+                        :disabled="categoryLoading[category.id]"
+                      >
+                        <i
+                          v-if="categoryLoading[category.id] === 'resetting'"
+                          class="fas fa-spinner fa-spin mr-2"
+                        ></i>
+                        <i v-else class="fas fa-undo mr-2"></i>
+                        {{
+                          categoryLoading[category.id] === "resetting"
+                            ? "Resetting..."
+                            : "Reset Category"
+                        }}
+                      </button>
+                      <button
+                        @click="finalizeCategory(category.id)"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-all duration-200 disabled:opacity-50"
+                        :disabled="categoryLoading[category.id]"
+                      >
+                        <i
+                          v-if="categoryLoading[category.id] === 'finalizing'"
+                          class="fas fa-spinner fa-spin mr-2"
+                        ></i>
+                        <i v-else class="fas fa-check mr-2"></i>
+                        {{
+                          categoryLoading[category.id] === "finalizing"
+                            ? "Finalizing..."
+                            : "Finalize Category"
+                        }}
+                      </button>
+                    </div>
+                  </div>
 
-                  <!-- Updated Candidate Selection Logic -->
+                  <!-- Candidate Selection Section -->
                   <template
                     v-if="
                       stage.status === 'active' && category.status === 'active'
                     "
                   >
-                    <select
-                      :value="category.current_candidate_id || ''"
-                      @change="
-                        (e) => onCandidateChange(category, e.target.value)
-                      "
-                      :disabled="
-                        category && isCandidateDropdownDisabled(category)
-                      "
-                      class="border border-gray-300 rounded px-2 py-1"
-                      :class="{
-                        'bg-gray-100 cursor-not-allowed':
-                          isCandidateDropdownDisabled(category),
-                        'bg-white': !isCandidateDropdownDisabled(category),
-                      }"
-                    >
-                      <option value="">
-                        {{
-                          category.current_candidate_id
-                            ? "Change Candidate"
-                            : "Select Candidate"
-                        }}
-                      </option>
-                      <!-- Use the updated filtering method -->
-                      <option
-                        v-for="candidate in getAvailableCandidates(category.id)"
-                        :key="candidate.candidate_id"
-                        :value="candidate.candidate_id"
+                    <div class="flex flex-col space-y-2">
+                      <button
+                        @click="openCandidateSelection(category)"
+                        :disabled="
+                          isCandidateDropdownDisabled(category) ||
+                          candidateLoading[category.id]
+                        "
+                        class="px-4 py-3 bg-white border-2 border-gray-300 rounded-lg hover:border-blue-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed min-w-[280px] text-left"
                         :class="{
-                          'font-semibold':
-                            category.current_candidate_id ===
-                            candidate.candidate_id,
+                          'border-green-500 bg-green-50':
+                            category.current_candidate_id &&
+                            !isCandidateDropdownDisabled(category),
+                          'border-red-300 bg-red-50':
+                            isCandidateDropdownDisabled(category),
+                          'border-gray-300 hover:border-blue-500':
+                            !category.current_candidate_id &&
+                            !isCandidateDropdownDisabled(category),
                         }"
                       >
-                        {{ candidate.candidate_number }} -
-                        {{ candidate.first_name }} {{ candidate.last_name }}
-                        <span
-                          v-if="
-                            category.current_candidate_id ===
-                            candidate.candidate_id
-                          "
-                        >
-                          (Current)</span
-                        >
-                      </option>
-                    </select>
+                        <div class="flex items-center justify-between">
+                          <div class="flex-1">
+                            <div
+                              v-if="category.current_candidate_id"
+                              class="flex items-center"
+                            >
+                              <div class="flex-1">
+                                <div class="font-medium text-gray-900">
+                                  {{
+                                    candidates.find(
+                                      (c) =>
+                                        c.candidate_id ===
+                                        category.current_candidate_id
+                                    )?.first_name
+                                  }}
+                                  {{
+                                    candidates.find(
+                                      (c) =>
+                                        c.candidate_id ===
+                                        category.current_candidate_id
+                                    )?.last_name
+                                  }}
+                                </div>
+                                <div class="text-sm text-gray-500">
+                                  #{{
+                                    candidates.find(
+                                      (c) =>
+                                        c.candidate_id ===
+                                        category.current_candidate_id
+                                    )?.candidate_number
+                                  }}
+                                  -
+                                  {{
+                                    candidates.find(
+                                      (c) =>
+                                        c.candidate_id ===
+                                        category.current_candidate_id
+                                    )?.team
+                                  }}
+                                </div>
+                              </div>
+                              <div class="ml-2">
+                                <span
+                                  v-if="!isCandidateDropdownDisabled(category)"
+                                  class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full"
+                                >
+                                  ✓ Set
+                                </span>
+                                <span
+                                  v-else
+                                  class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full"
+                                >
+                                  🔒 Locked
+                                </span>
+                              </div>
+                            </div>
+                            <div v-else class="text-gray-500">
+                              <i class="fas fa-user-plus mr-2"></i>
+                              Select Candidate
+                            </div>
+                          </div>
+                          <div class="ml-3">
+                            <i
+                              v-if="candidateLoading[category.id]"
+                              class="fas fa-spinner fa-spin text-blue-500"
+                            ></i>
+                            <i
+                              v-else
+                              class="fas fa-chevron-down text-gray-400"
+                            ></i>
+                          </div>
+                        </div>
+                      </button>
 
-                    <!-- Enhanced Status Messages -->
-                    <div class="text-xs mt-1">
-                      <p v-if="hasPending(category.id)" class="text-red-500">
-                        Scoring in progress - dropdown disabled
-                      </p>
-                      <p
-                        v-else-if="category.current_candidate_id"
-                        class="text-green-500"
-                      >
-                        All scores confirmed - can change candidate
-                      </p>
-                      <p v-else class="text-gray-500">
-                        Ready to select candidate
-                      </p>
-                      <!-- Show count of available candidates -->
-                      <p class="text-gray-400 text-xs">
-                        {{ getAvailableCandidates(category.id).length }}
-                        candidates available
-                        <span v-if="category.current_candidate_id"
-                          >(including current)</span
+                      <!-- Status indicators -->
+                      <div class="text-xs pl-2">
+                        <p
+                          v-if="hasPending(category.id)"
+                          class="text-red-600 flex items-center"
                         >
-                      </p>
+                          <i class="fas fa-lock mr-1"></i>
+                          Scoring in progress - selection locked
+                        </p>
+                        <p
+                          v-else-if="category.current_candidate_id"
+                          class="text-green-600 flex items-center"
+                        >
+                          <i class="fas fa-check-circle mr-1"></i>
+                          All scores confirmed - can change candidate
+                        </p>
+                        <p v-else class="text-blue-600 flex items-center">
+                          <i class="fas fa-info-circle mr-1"></i>
+                          Ready to select candidate
+                        </p>
+                        <p class="text-gray-500 mt-1">
+                          {{ getAvailableCandidates(category.id).length }}
+                          candidates available
+                        </p>
+                      </div>
                     </div>
                   </template>
 
@@ -1038,7 +1417,10 @@ watchEffect(async () => {
           </div>
         </div>
       </div>
-      <div v-else class="text-center py-10">
+      <div
+        v-if="!stages.length && !Object.keys(stageLoading).length"
+        class="text-center py-10"
+      >
         <p class="text-gray-500">No stages found.</p>
       </div>
     </div>
@@ -1052,7 +1434,7 @@ watchEffect(async () => {
           class="ml-2 text-sm cursor-help"
           v-tooltip="{
             content: enhancedScoringTooltipContent,
-            allowHTML: true,
+            html: true,
             triggers: ['hover', 'click'],
           }"
         >
@@ -1061,7 +1443,7 @@ watchEffect(async () => {
       </h3>
 
       <div
-        v-if="partialResults.length === 0"
+        v-if="activePartialResults.length === 0"
         class="text-center py-8 text-gray-500"
       >
         <i class="fas fa-chart-bar text-gray-300 text-3xl mb-2"></i>
@@ -1146,7 +1528,7 @@ watchEffect(async () => {
                         {{
                           Number(
                             result.mean_rating || result.raw_average
-                          ).toFixed(1)
+                          ).toFixed(2)
                         }}/{{ eventMaxScore }}
                       </span>
                     </td>
@@ -1248,7 +1630,7 @@ watchEffect(async () => {
                         {{
                           Number(
                             result.mean_rating || result.raw_average
-                          ).toFixed(1)
+                          ).toFixed(2)
                         }}/{{ eventMaxScore }}
                       </span>
                     </td>
@@ -1309,7 +1691,7 @@ watchEffect(async () => {
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
                 <tr
-                  v-for="result in partialResults"
+                  v-for="result in activePartialResults"
                   :key="result.candidate_id"
                   class="hover:bg-gray-50 transition-colors"
                 >
@@ -1342,7 +1724,7 @@ watchEffect(async () => {
                       {{
                         Number(
                           result.mean_rating || result.raw_average
-                        ).toFixed(1)
+                        ).toFixed(2)
                       }}/{{ eventMaxScore }}
                     </span>
                   </td>
@@ -1379,7 +1761,7 @@ watchEffect(async () => {
               class="ml-2 text-sm cursor-help"
               v-tooltip="{
                 content: enhancedScoringTooltipContent,
-                allowHTML: true,
+                html: true,
                 triggers: ['hover', 'click'],
               }"
             >
@@ -1393,7 +1775,7 @@ watchEffect(async () => {
 
         <div class="p-6">
           <!-- Partial Results Display -->
-          <div v-if="partialResults.length" class="mb-6">
+          <div v-if="activePartialResults.length" class="mb-6">
             <h4 class="text-lg font-semibold mb-4 text-gray-800">
               Current Standings
             </h4>
@@ -1456,7 +1838,7 @@ watchEffect(async () => {
                             {{
                               Number(
                                 result.mean_rating || result.raw_average
-                              ).toFixed(1)
+                              ).toFixed(2)
                             }}
                           </span>
                         </td>
@@ -1523,7 +1905,7 @@ watchEffect(async () => {
                             {{
                               Number(
                                 result.mean_rating || result.raw_average
-                              ).toFixed(1)
+                              ).toFixed(2)
                             }}
                           </span>
                         </td>
@@ -1721,6 +2103,286 @@ watchEffect(async () => {
             <i v-if="loading" class="fas fa-spinner fa-spin mr-2"></i>
             <i v-else class="fas fa-check mr-2"></i>
             {{ loading ? "Selecting..." : "Confirm Selection" }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Enhanced Candidate Selection Modal -->
+    <div
+      v-if="showCandidateModal"
+      class="fixed inset-0 bg-gray-600 bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
+    >
+      <div
+        class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden"
+      >
+        <div class="p-6 border-b border-gray-200">
+          <div class="flex justify-between items-center">
+            <h3 class="text-xl font-bold text-gray-800 flex items-center">
+              <i class="fas fa-users text-blue-500 mr-2"></i>
+              Select Candidate for {{ selectedCategoryForCandidate?.name }}
+            </h3>
+            <button
+              @click="showCandidateModal = false"
+              class="text-gray-400 hover:text-gray-600"
+            >
+              <i class="fas fa-times text-xl"></i>
+            </button>
+          </div>
+
+          <!-- Search Bar -->
+          <div class="mt-4">
+            <div class="relative">
+              <i
+                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+              ></i>
+              <input
+                v-model="candidateSearchTerm"
+                type="text"
+                placeholder="Search by name, number, or team..."
+                class="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="p-6 max-h-96 overflow-y-auto">
+          <div
+            v-if="!filteredCandidatesForSelection.length"
+            class="text-center py-8 text-gray-500"
+          >
+            <i class="fas fa-search text-gray-300 text-3xl mb-2"></i>
+            <p>No candidates found matching your search.</p>
+          </div>
+
+          <div v-else class="grid gap-3">
+            <button
+              v-for="candidate in filteredCandidatesForSelection"
+              :key="candidate.candidate_id"
+              @click="selectCandidateFromModal(candidate.candidate_id)"
+              :disabled="candidateLoading[selectedCategoryForCandidate?.id]"
+              class="flex items-center p-4 bg-white border-2 border-gray-200 rounded-lg hover:border-blue-500 hover:bg-blue-50 transition-all duration-200 disabled:opacity-50 text-left"
+              :class="{
+                'border-green-500 bg-green-50':
+                  candidate.candidate_id ===
+                  selectedCategoryForCandidate?.current_candidate_id,
+                'ring-2 ring-blue-200':
+                  candidate.candidate_id ===
+                  selectedCategoryForCandidate?.current_candidate_id,
+              }"
+            >
+              <div class="flex-1">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="font-semibold text-gray-900 flex items-center">
+                      <span
+                        class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm font-bold mr-3"
+                      >
+                        #{{ candidate.candidate_number }}
+                      </span>
+                      {{ candidate.first_name }} {{ candidate.last_name }}
+                      <span
+                        v-if="
+                          candidate.candidate_id ===
+                          selectedCategoryForCandidate?.current_candidate_id
+                        "
+                        class="ml-2 text-green-600"
+                      >
+                        <i class="fas fa-check-circle"></i>
+                      </span>
+                    </div>
+                    <div class="text-sm text-gray-600 mt-1">
+                      <i class="fas fa-users mr-1"></i>
+                      {{ candidate.team }}
+                    </div>
+                  </div>
+                  <div class="text-right">
+                    <div class="text-xs text-gray-500 uppercase tracking-wide">
+                      {{ candidate.sex === "M" ? "Male" : "Female" }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="ml-4">
+                <i
+                  v-if="candidateLoading[selectedCategoryForCandidate?.id]"
+                  class="fas fa-spinner fa-spin text-blue-500"
+                ></i>
+                <i v-else class="fas fa-chevron-right text-gray-400"></i>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <div
+          class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-between items-center"
+        >
+          <div class="text-sm text-gray-600">
+            <i class="fas fa-info-circle mr-1"></i>
+            {{ filteredCandidatesForSelection.length }} candidates available
+          </div>
+          <button
+            @click="showCandidateModal = false"
+            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="showCandidateConfirmModal"
+      class="fixed inset-0 bg-gray-600 bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
+    >
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+        <div class="p-6 border-b border-gray-200">
+          <h3 class="text-xl font-bold text-gray-800 flex items-center">
+            <i class="fas fa-exclamation-triangle text-orange-500 mr-2"></i>
+            Confirm Candidate Selection
+          </h3>
+        </div>
+
+        <div class="p-6">
+          <div class="mb-4">
+            <p class="text-gray-600 mb-3">
+              Are you sure you want to select this candidate for scoring?
+            </p>
+
+            <!-- Candidate Info Card -->
+            <div class="bg-gray-50 rounded-lg p-4 border-2 border-gray-200">
+              <div class="flex items-center">
+                <div
+                  class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-bold mr-3"
+                >
+                  #{{
+                    selectedCandidateForConfirmation?.candidate
+                      ?.candidate_number
+                  }}
+                </div>
+                <div>
+                  <div class="font-semibold text-gray-900">
+                    {{
+                      selectedCandidateForConfirmation?.candidate?.first_name
+                    }}
+                    {{ selectedCandidateForConfirmation?.candidate?.last_name }}
+                  </div>
+                  <div class="text-sm text-gray-600">
+                    {{ selectedCandidateForConfirmation?.candidate?.team }} •
+                    {{
+                      selectedCandidateForConfirmation?.candidate?.sex === "M"
+                        ? "Male"
+                        : "Female"
+                    }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Category Info -->
+            <div class="mt-3 text-sm text-gray-600">
+              <strong>Category:</strong>
+              {{ selectedCandidateForConfirmation?.categoryName }}
+            </div>
+          </div>
+
+          <!-- Warning Message -->
+          <div class="bg-orange-50 border-l-4 border-orange-400 p-4 mb-4">
+            <div class="flex">
+              <div class="flex-shrink-0">
+                <i class="fas fa-lock text-orange-400 text-lg"></i>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-orange-800 font-medium">
+                  Important: Selection Lock
+                </p>
+                <p class="text-sm text-orange-700 mt-1">
+                  Once you confirm this selection,
+                  <strong>the candidate will be locked for scoring</strong>
+                  until all judges have submitted and confirmed their scores.
+                  You will not be able to change the candidate during the
+                  scoring process.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end space-x-3"
+        >
+          <button
+            @click="showCandidateConfirmModal = false"
+            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+          >
+            <i class="fas fa-times mr-1"></i>
+            Cancel
+          </button>
+          <button
+            @click="confirmCandidateSelection"
+            class="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition disabled:opacity-50"
+            :disabled="
+              candidateLoading[selectedCandidateForConfirmation?.categoryId]
+            "
+          >
+            <i
+              v-if="
+                candidateLoading[selectedCandidateForConfirmation?.categoryId]
+              "
+              class="fas fa-spinner fa-spin mr-2"
+            ></i>
+            <i v-else class="fas fa-lock mr-2"></i>
+            {{
+              candidateLoading[selectedCandidateForConfirmation?.categoryId]
+                ? "Confirming..."
+                : "Confirm & Lock Selection"
+            }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- PDF Preview Modal -->
+    <div
+      v-if="showPreview"
+      class="fixed inset-0 bg-gray-600 bg-opacity-50 backdrop-blur-sm flex items-center justify-center z-50"
+    >
+      <div
+        class="bg-white rounded-xl shadow-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden"
+      >
+        <div
+          class="p-4 border-b border-gray-200 flex justify-between items-center"
+        >
+          <h3 class="text-xl font-bold text-gray-800 flex items-center">
+            <i class="fas fa-file-pdf text-red-500 mr-2"></i>
+            Final Results Preview
+          </h3>
+          <button
+            @click="closePreview"
+            class="text-gray-400 hover:text-gray-600 text-xl"
+          >
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <div class="p-4 h-[80vh]">
+          <iframe
+            v-if="previewUrl"
+            :src="previewUrl"
+            class="w-full h-full border-0 rounded"
+            title="PDF Preview"
+          ></iframe>
+          <div v-else class="flex items-center justify-center h-full">
+            <i class="fas fa-spinner fa-spin text-3xl text-gray-400"></i>
+          </div>
+        </div>
+
+        <div
+          class="px-4 py-3 bg-gray-50 border-t border-gray-200 flex justify-end"
+        >
+          <button
+            @click="closePreview"
+            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition"
+          >
+            <i class="fas fa-times mr-1"></i>
+            Close Preview
           </button>
         </div>
       </div>

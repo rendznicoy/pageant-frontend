@@ -299,7 +299,7 @@ const pageNumbers = computed(() => {
           <div
             class="flex flex-col md:flex-row justify-between items-center gap-4"
           >
-            <div class="flex items-center space-x-2 w-full md:w-40">
+            <div class="flex items-center space-x-2 w-full md:w-80">
               <EventFilters v-model:filter="filter" />
             </div>
 

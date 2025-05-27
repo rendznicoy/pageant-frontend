@@ -164,6 +164,9 @@ const updateCoverPhoto = async (file) => {
   );
   formData.append("description", event.value?.description || "");
   formData.append("status", event.value?.status || "inactive");
+  if (event.value?.statisticians) {
+    formData.append("statisticians", JSON.stringify(event.value.statisticians));
+  }
 
   try {
     await axiosClient.post(`/api/v1/events/${eventId}/edit`, formData, {
@@ -438,7 +441,7 @@ watch(activeTab, (newTab) => {
   >
     <div class="transition-all duration-300">
       <Breadcrumbs
-        :items="[{ label: 'Home', to: 'auto' }, { label: event.event_name }]"
+        :items="[{ label: 'Home', to: 'auto' }, { label: event?.event_name }]"
       />
       <div class="container mx-auto px-4 py-6">
         <!-- Loading state -->

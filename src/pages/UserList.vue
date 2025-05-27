@@ -118,6 +118,11 @@ const filteredUsers = computed(() => {
 
   let filtered = [...users.value];
 
+  // 🔁 Exclude judges unless explicitly filtered
+  if (filterRole.value === "") {
+    filtered = filtered.filter((user) => user.role !== "judge");
+  }
+
   if (filterRole.value) {
     filtered = filtered.filter((user) => user.role === filterRole.value);
   }
@@ -132,25 +137,26 @@ const filteredUsers = computed(() => {
     );
   }
 
-  // Apply sorting
-  console.log("Sorting by:", sortField.value, sortDirection.value);
+  // 🔁 Custom sorting: Admin > Tabulator (Judges already excluded unless filtered)
   filtered.sort((a, b) => {
-    let valueA, valueB;
+    const rolePriority = { admin: 0, tabulator: 1, judge: 2 };
+    const priorityA = rolePriority[a.role] ?? 99;
+    const priorityB = rolePriority[b.role] ?? 99;
 
-    if (sortField.value === "id") {
-      valueA = a.user_id;
-      valueB = b.user_id;
-    } else if (sortField.value === "name") {
-      valueA = `${a.first_name} ${a.last_name}`.toLowerCase();
-      valueB = `${b.first_name} ${b.last_name}`.toLowerCase();
+    if (priorityA !== priorityB) return priorityA - priorityB;
+
+    // Secondary sort by name or ID
+    if (sortField.value === "name") {
+      const nameA = `${a.first_name} ${a.last_name}`.toLowerCase();
+      const nameB = `${b.first_name} ${b.last_name}`.toLowerCase();
+      return sortDirection.value === "asc"
+        ? nameA.localeCompare(nameB)
+        : nameB.localeCompare(nameA);
     } else {
-      valueA = a[sortField.value].toLowerCase();
-      valueB = b[sortField.value].toLowerCase();
+      const valueA = a.user_id;
+      const valueB = b.user_id;
+      return sortDirection.value === "asc" ? valueA - valueB : valueB - valueA;
     }
-
-    if (valueA < valueB) return sortDirection.value === "asc" ? -1 : 1;
-    if (valueA > valueB) return sortDirection.value === "asc" ? 1 : -1;
-    return 0;
   });
 
   return filtered;
