@@ -95,9 +95,10 @@ function redirectToJudgeLogin() {
 }
 
 function handleGoogleLogin() {
-  isCheckingAuth.value = true; // Show checking authentication for Google login
-  window.location.href =
-    axiosClient.defaults.baseURL + "/api/v1/auth/google/redirect";
+  isCheckingAuth.value = true;
+  const currentPath = router.currentRoute.value.fullPath;
+  const role = currentPath.includes("/judge") ? "judge" : "admin";
+  window.location.href = `${axiosClient.defaults.baseURL}/login/${role}/api/v1/auth/google/redirect`;
 }
 
 function handleCookieIconClick() {
