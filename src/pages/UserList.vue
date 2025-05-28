@@ -517,39 +517,53 @@ onUnmounted(() => {
       >
         <!-- Header -->
         <div class="flex justify-between items-center pt-2 pb-0 mb-4">
-          <div class="flex items-center space-x-2">
-            <i
-              class="fas fa-users text-2xl mb-1 transition-colors duration-200"
-              :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
-            ></i>
-            <h1
-              class="text-lg font-bold transition-colors duration-200"
-              :class="isDarkMode ? 'text-green-300' : 'text-green-800'"
+          <div class="flex items-center space-x-3">
+            <div
+              class="w-10 h-10 rounded-lg flex items-center justify-center"
+              :class="
+                isDarkMode
+                  ? 'bg-green-900/30 text-green-400'
+                  : 'bg-green-100 text-green-600'
+              "
             >
-              User Management
-            </h1>
+              <i class="fas fa-users text-lg"></i>
+            </div>
+            <div>
+              <h1
+                class="text-xl font-bold transition-colors duration-200"
+                :class="isDarkMode ? 'text-white' : 'text-gray-800'"
+              >
+                User Management
+              </h1>
+              <p
+                class="text-sm transition-colors duration-200"
+                :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+              >
+                Manage system users and roles
+              </p>
+            </div>
           </div>
-          <div class="flex space-x-2">
+          <div class="flex space-x-3">
             <button
               v-if="selectedUsers.length"
               @click="deleteSelected"
-              class="px-4 py-2 text-white rounded-md focus:outline-none transition-colors duration-200"
+              class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 transform hover:scale-105"
               :class="
                 isDarkMode
-                  ? 'bg-red-700 hover:bg-red-600'
-                  : 'bg-red-600 hover:bg-red-700'
+                  ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
+                  : 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
               "
             >
               <i class="fas fa-trash mr-2"></i>
-              Delete Selected
+              Delete Selected ({{ selectedUsers.length }})
             </button>
             <button
               @click="showCreateModal = true"
-              class="px-4 py-2 text-white rounded-md focus:outline-none transition-colors duration-200"
+              class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 transform hover:scale-105"
               :class="
                 isDarkMode
-                  ? 'bg-green-700 hover:bg-green-600'
-                  : 'bg-green-600 hover:bg-green-700'
+                  ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
+                  : 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
               "
             >
               <i class="fas fa-plus mr-2"></i>
@@ -561,35 +575,41 @@ onUnmounted(() => {
         <!-- Server Error -->
         <div
           v-if="serverError"
-          class="border px-4 py-3 rounded relative mb-4 transition-colors duration-300"
+          class="border px-4 py-3 rounded-lg relative mb-4 transition-colors duration-300"
           :class="
             isDarkMode
               ? 'bg-red-900/30 border-red-400 text-red-300'
-              : 'bg-red-200 border-red-500 text-red-800'
+              : 'bg-red-50 border-red-200 text-red-800'
           "
           role="alert"
         >
-          <span class="block sm:inline">{{ serverError }}</span>
+          <div class="flex items-center">
+            <i class="fas fa-exclamation-triangle mr-2"></i>
+            <span>{{ serverError }}</span>
+          </div>
         </div>
 
         <!-- Filters and Search -->
         <div
-          class="border rounded-lg p-4 mb-6 transition-colors duration-300"
+          class="border rounded-xl p-6 mb-6 transition-colors duration-300"
           :class="
             isDarkMode
-              ? 'bg-gray-700 border-gray-600'
-              : 'bg-white border-gray-200'
+              ? 'bg-gray-700/50 border-gray-600'
+              : 'bg-gray-50 border-gray-200'
           "
         >
           <div
             class="flex flex-col md:flex-row justify-between items-center gap-4"
           >
             <!-- Filters -->
-            <div class="flex items-center space-x-2 w-full md:w-40">
-              <div
-                class="relative w-full max-w-xs overflow-x-auto overflow-y-auto"
+            <div class="flex items-center space-x-3">
+              <label
+                class="text-sm font-medium transition-colors duration-200"
+                :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
               >
-                <!-- Left filter icon -->
+                Filter by Role:
+              </label>
+              <div class="relative">
                 <div
                   class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
                 >
@@ -598,26 +618,14 @@ onUnmounted(() => {
                     :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
                   ></i>
                 </div>
-
-                <!-- Right chevron icon -->
-                <div
-                  class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
-                >
-                  <i
-                    class="fas fa-chevron-down text-sm transition-colors duration-200"
-                    :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
-                  ></i>
-                </div>
-
-                <!-- Dropdown select -->
                 <select
                   v-model="filterRole"
                   @change="fetchUsers"
-                  class="block w-full appearance-none border rounded-lg pl-10 pr-8 py-2 text-sm focus:outline-none focus:ring-2 transition-colors duration-200"
+                  class="block appearance-none border rounded-lg pl-10 pr-8 py-2.5 text-sm focus:outline-none focus:ring-2 transition-all duration-200"
                   :class="
                     isDarkMode
-                      ? 'border-green-600 bg-gray-600 text-gray-300 focus:ring-green-400 hover:bg-gray-500'
-                      : 'border-green-300 bg-white text-gray-700 focus:ring-green-600 hover:bg-green-50'
+                      ? 'border-gray-600 bg-gray-600 text-gray-200 focus:ring-green-400 focus:border-green-400'
+                      : 'border-gray-300 bg-white text-gray-700 focus:ring-green-500 focus:border-green-500'
                   "
                 >
                   <option value="">All Roles</option>
@@ -625,123 +633,191 @@ onUnmounted(() => {
                   <option value="tabulator">Tabulator</option>
                   <option value="judge">Judge</option>
                 </select>
+                <div
+                  class="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none"
+                >
+                  <i
+                    class="fas fa-chevron-down text-sm transition-colors duration-200"
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
+                  ></i>
+                </div>
               </div>
             </div>
 
             <!-- Search -->
-            <div class="relative w-full md:w-300">
-              <i
-                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 transition-colors duration-200"
-                :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
-              ></i>
+            <div class="relative w-full md:w-80">
+              <div
+                class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+              >
+                <i
+                  class="fas fa-search transition-colors duration-200"
+                  :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+                ></i>
+              </div>
               <input
                 v-model="searchTerm"
                 type="search"
-                placeholder="Search by name or email"
-                class="pl-10 pr-4 py-2 border rounded-lg w-full focus:outline-none focus:ring-2 text-sm transition-colors duration-200"
+                placeholder="Search by name or email..."
+                class="pl-10 pr-4 py-2.5 border rounded-lg w-full focus:outline-none focus:ring-2 text-sm transition-all duration-200"
                 :class="
                   isDarkMode
-                    ? 'border-gray-600 bg-gray-600 text-gray-100 focus:ring-green-400 placeholder-gray-400'
-                    : 'border-gray-300 bg-white text-gray-900 focus:ring-green-600 placeholder-gray-500'
+                    ? 'border-gray-600 bg-gray-600 text-gray-100 focus:ring-green-400 focus:border-green-400 placeholder-gray-400'
+                    : 'border-gray-300 bg-white text-gray-900 focus:ring-green-500 focus:border-green-500 placeholder-gray-500'
                 "
               />
             </div>
           </div>
         </div>
 
+        <!-- Loading State -->
+        <div v-if="isLoading" class="flex justify-center items-center py-12">
+          <div class="text-center">
+            <i
+              class="fas fa-spinner fa-spin text-3xl mb-4"
+              :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
+            ></i>
+            <p
+              class="text-sm"
+              :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+            >
+              Loading users...
+            </p>
+          </div>
+        </div>
+
         <!-- User List Card Grid -->
-        <div class="overflow-x-auto">
+        <div v-else class="overflow-x-auto">
           <div
             class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"
           >
             <div
               v-for="user in paginatedUsers"
               :key="user?.user_id"
-              class="rounded-lg border shadow-md p-4 flex flex-col relative transition-all duration-300"
+              class="group rounded-xl border shadow-sm p-6 flex flex-col relative transition-all duration-300 hover:shadow-lg transform hover:-translate-y-1"
               :class="
                 isDarkMode
-                  ? 'bg-gray-700 border-gray-600 hover:shadow-gray-800/40'
-                  : 'bg-white border-gray-200 hover:shadow-lg'
+                  ? 'bg-gray-700 border-gray-600 hover:shadow-gray-900/20 hover:border-gray-500'
+                  : 'bg-white border-gray-200 hover:shadow-gray-200/50 hover:border-gray-300'
               "
-              name="card"
             >
-              <!-- delete icon -->
-              <div class="absolute top-2 right-2">
+              <!-- Selection Checkbox -->
+              <div class="absolute top-3 left-3">
+                <input
+                  type="checkbox"
+                  :value="user.user_id"
+                  v-model="selectedUsers"
+                  class="w-4 h-4 rounded border-2 focus:ring-2 transition-colors duration-200"
+                  :class="
+                    isDarkMode
+                      ? 'bg-gray-600 border-gray-500 text-green-500 focus:ring-green-400'
+                      : 'bg-white border-gray-300 text-green-600 focus:ring-green-500'
+                  "
+                />
+              </div>
+
+              <!-- Delete Icon -->
+              <div class="absolute top-3 right-3">
                 <button
                   @click="confirmDelete(user)"
-                  class="p-1 rounded-full transition-colors duration-200"
+                  class="opacity-0 group-hover:opacity-100 p-1.5 rounded-full transition-all duration-200 transform hover:scale-110"
                   :class="
-                    isDarkMode ? 'hover:bg-gray-600' : 'hover:bg-gray-100'
+                    isDarkMode
+                      ? 'hover:bg-red-900/30 text-red-400 hover:text-red-300'
+                      : 'hover:bg-red-50 text-red-500 hover:text-red-700'
                   "
+                  title="Delete user"
                 >
-                  <i
-                    class="fas fa-trash transition-colors duration-200"
-                    :class="
-                      isDarkMode
-                        ? 'text-red-400 hover:text-red-300'
-                        : 'text-red-500 hover:text-red-700'
-                    "
-                  ></i>
+                  <i class="fas fa-trash text-sm"></i>
                 </button>
               </div>
 
-              <!-- profile image -->
+              <!-- Profile Image -->
               <div class="mb-4 flex justify-center">
-                <img
-                  :src="user.profile_photo || '/user24.png'"
-                  alt="Profile"
-                  class="w-16 h-16 rounded-full object-cover border-2 shadow-sm transition-colors duration-200"
-                  :class="isDarkMode ? 'border-green-400' : 'border-green-500'"
-                  @error="handleImageError"
-                />
+                <div class="relative">
+                  <img
+                    :src="user.profile_photo || '/user24.png'"
+                    alt="Profile"
+                    class="w-20 h-20 rounded-full object-cover border-3 shadow-lg transition-all duration-300 group-hover:shadow-xl"
+                    :class="
+                      isDarkMode
+                        ? 'border-green-400 group-hover:border-green-300'
+                        : 'border-green-500 group-hover:border-green-400'
+                    "
+                    @error="handleImageError"
+                  />
+                  <!-- Online indicator (optional) -->
+                  <div
+                    class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 flex items-center justify-center"
+                    :class="
+                      isDarkMode
+                        ? 'bg-green-500 border-gray-700'
+                        : 'bg-green-500 border-white'
+                    "
+                  >
+                    <i class="fas fa-check text-white text-xs"></i>
+                  </div>
+                </div>
               </div>
 
               <!-- Name -->
               <h3
-                class="text-lg font-semibold text-center mb-2 transition-colors duration-200"
+                class="text-lg font-semibold text-center mb-3 transition-colors duration-200"
                 :class="isDarkMode ? 'text-gray-100' : 'text-gray-900'"
               >
                 {{ user.first_name }} {{ user.last_name }}
               </h3>
 
-              <!-- Email -->
-              <div
-                class="flex items-center justify-start text-sm mb-1 transition-colors duration-200"
-                :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
-              >
-                <i
-                  class="fas fa-envelope mr-2 transition-colors duration-200"
-                  :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
-                ></i>
-                <span class="truncate">{{ user.email }}</span>
+              <!-- User Details -->
+              <div class="space-y-2 mb-4 flex-grow">
+                <!-- Email -->
+                <div
+                  class="flex items-center text-sm transition-colors duration-200"
+                  :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+                >
+                  <div
+                    class="w-8 h-8 rounded-lg flex items-center justify-center mr-3 flex-shrink-0"
+                    :class="
+                      isDarkMode
+                        ? 'bg-blue-900/30 text-blue-400'
+                        : 'bg-blue-100 text-blue-600'
+                    "
+                  >
+                    <i class="fas fa-envelope text-xs"></i>
+                  </div>
+                  <span class="truncate">{{ user.email }}</span>
+                </div>
+
+                <!-- Username -->
+                <div
+                  class="flex items-center text-sm transition-colors duration-200"
+                  :class="isDarkMode ? 'text-gray-500' : 'text-gray-500'"
+                >
+                  <div
+                    class="w-8 h-8 rounded-lg flex items-center justify-center mr-3 flex-shrink-0"
+                    :class="
+                      isDarkMode
+                        ? 'bg-purple-900/30 text-purple-400'
+                        : 'bg-purple-100 text-purple-600'
+                    "
+                  >
+                    <i class="fas fa-user text-xs"></i>
+                  </div>
+                  <span class="truncate">{{ user.username }}</span>
+                </div>
               </div>
 
-              <!-- Username -->
-              <div
-                class="flex items-center justify-start text-xs mb-3 transition-colors duration-200"
-                :class="isDarkMode ? 'text-gray-500' : 'text-gray-500'"
-              >
-                <i
-                  class="fas fa-user mr-2 transition-colors duration-200"
-                  :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
-                ></i>
-                <span class="truncate">{{ user.username }}</span>
-              </div>
-
-              <!-- Centered Role dropdown -->
-              <div
-                class="relative mt-2 w-full flex justify-center role-dropdown"
-              >
+              <!-- FIXED Role Dropdown -->
+              <div class="relative role-dropdown">
                 <button
-                  class="inline-flex items-center justify-center px-3 py-1 text-sm font-medium rounded-full transition-colors duration-200"
+                  class="w-full inline-flex items-center justify-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2"
                   :class="
                     user.role !== 'judge'
                       ? isDarkMode
-                        ? 'bg-green-900/30 text-green-300 hover:bg-green-800/40'
-                        : 'bg-green-100 text-green-800 hover:bg-green-200'
+                        ? 'bg-green-900/30 text-green-300 hover:bg-green-800/40 border border-green-700/50 focus:ring-green-400'
+                        : 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 focus:ring-green-500'
                       : isDarkMode
-                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed'
-                      : 'bg-gray-100 text-gray-500 cursor-not-allowed'
+                      ? 'bg-gray-600 text-gray-400 cursor-not-allowed border border-gray-600'
+                      : 'bg-gray-100 text-gray-500 cursor-not-allowed border border-gray-200'
                   "
                   :disabled="user.role === 'judge'"
                   @click="
@@ -759,101 +835,216 @@ onUnmounted(() => {
                   {{ capitalizeRole(user.role) }}
                   <i
                     v-if="user.role !== 'judge'"
-                    class="fas fa-caret-down ml-2 text-xs"
+                    class="fas fa-chevron-down ml-2 text-xs transition-transform duration-200"
+                    :class="{ 'rotate-180': dropdownVisible === user.user_id }"
                   ></i>
                 </button>
 
-                <!-- Role Options -->
+                <!-- FIXED Role Options - Now positioned correctly below button -->
                 <div
                   v-if="dropdownVisible === user.user_id"
-                  class="absolute z-10 mt-2 w-40 border rounded shadow-lg transition-colors duration-200"
+                  class="absolute top-full left-0 right-0 z-20 mt-2 border rounded-lg shadow-xl transition-all duration-200 transform origin-top animate-in fade-in slide-in-from-top-2"
                   :class="
                     isDarkMode
                       ? 'bg-gray-600 border-gray-500'
                       : 'bg-white border-gray-200'
                   "
                 >
-                  <button
-                    v-for="option in ['admin', 'tabulator']"
-                    :key="option"
-                    :disabled="user.role === option"
-                    class="flex items-center w-full px-4 py-2 text-sm text-left transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
-                    :class="
-                      isDarkMode
-                        ? 'text-gray-300 hover:bg-green-800/30'
-                        : 'text-gray-700 hover:bg-green-100'
-                    "
-                    @click.prevent="confirmRoleChange(user, option)"
-                  >
-                    <i
-                      class="fas mr-2"
-                      :class="{
-                        'fa-user-shield': option === 'admin',
-                        'fa-user-cog': option === 'tabulator',
-                      }"
-                    ></i>
-                    {{ capitalizeRole(option) }}
-                  </button>
+                  <div class="py-2">
+                    <button
+                      v-for="option in ['admin', 'tabulator']"
+                      :key="option"
+                      :disabled="user.role === option"
+                      class="flex items-center w-full px-4 py-3 text-sm text-left transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed first:rounded-t-lg last:rounded-b-lg"
+                      :class="
+                        user.role === option
+                          ? isDarkMode
+                            ? 'bg-green-900/20 text-green-300'
+                            : 'bg-green-50 text-green-700'
+                          : isDarkMode
+                          ? 'text-gray-300 hover:bg-gray-500 hover:text-white'
+                          : 'text-gray-700 hover:bg-gray-50'
+                      "
+                      @click.prevent="confirmRoleChange(user, option)"
+                    >
+                      <div
+                        class="w-8 h-8 rounded-lg flex items-center justify-center mr-3"
+                        :class="
+                          option === 'admin'
+                            ? isDarkMode
+                              ? 'bg-blue-900/30 text-blue-400'
+                              : 'bg-blue-100 text-blue-600'
+                            : isDarkMode
+                            ? 'bg-purple-900/30 text-purple-400'
+                            : 'bg-purple-100 text-purple-600'
+                        "
+                      >
+                        <i
+                          class="fas text-xs"
+                          :class="{
+                            'fa-user-shield': option === 'admin',
+                            'fa-user-cog': option === 'tabulator',
+                          }"
+                        ></i>
+                      </div>
+                      <div>
+                        <div class="font-medium">
+                          {{ capitalizeRole(option) }}
+                        </div>
+                        <div
+                          class="text-xs opacity-75"
+                          :class="
+                            isDarkMode ? 'text-gray-400' : 'text-gray-500'
+                          "
+                        >
+                          {{
+                            option === "admin"
+                              ? "Full system access"
+                              : "Event management"
+                          }}
+                        </div>
+                      </div>
+                      <i
+                        v-if="user.role === option"
+                        class="fas fa-check ml-auto text-green-500"
+                      ></i>
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              <!-- Edit Button -->
+              <button
+                @click="openEditModal(user)"
+                class="mt-3 w-full inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2"
+                :class="
+                  isDarkMode
+                    ? 'bg-gray-600 text-gray-300 hover:bg-gray-500 border border-gray-500 focus:ring-gray-400'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 focus:ring-gray-400'
+                "
+              >
+                <i class="fas fa-edit mr-2"></i>
+                Edit User
+              </button>
             </div>
+          </div>
+
+          <!-- Empty State -->
+          <div
+            v-if="!paginatedUsers.length && !isLoading"
+            class="text-center py-12"
+          >
+            <div
+              class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4"
+              :class="
+                isDarkMode
+                  ? 'bg-gray-700 text-gray-500'
+                  : 'bg-gray-100 text-gray-400'
+              "
+            >
+              <i class="fas fa-users text-3xl"></i>
+            </div>
+            <h3
+              class="text-lg font-medium mb-2"
+              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+            >
+              No users found
+            </h3>
+            <p
+              class="text-sm mb-6"
+              :class="isDarkMode ? 'text-gray-500' : 'text-gray-500'"
+            >
+              Try adjusting your search or filter criteria
+            </p>
+            <button
+              @click="showCreateModal = true"
+              class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg transition-all duration-200"
+              :class="
+                isDarkMode
+                  ? 'bg-green-600 hover:bg-green-700'
+                  : 'bg-green-600 hover:bg-green-700'
+              "
+            >
+              <i class="fas fa-plus mr-2"></i>
+              Create First User
+            </button>
           </div>
         </div>
 
-        <!-- Pagination Controls -->
+        <!-- Enhanced Pagination Controls -->
         <div
-          class="border rounded-lg shadow-md p-4 mt-6 mx-4 flex justify-between items-center transition-colors duration-300"
+          v-if="paginatedUsers.length"
+          class="border rounded-xl shadow-sm p-4 mt-6 flex flex-col sm:flex-row justify-between items-center gap-4 transition-colors duration-300"
           :class="
             isDarkMode
-              ? 'bg-gray-700 border-gray-600'
-              : 'bg-white border-gray-200'
+              ? 'bg-gray-700/50 border-gray-600'
+              : 'bg-gray-50 border-gray-200'
           "
         >
-          <span
-            class="text-sm transition-colors duration-200"
-            :class="isDarkMode ? 'text-green-400' : 'text-green-600'"
-          >
-            Showing {{ (currentPage - 1) * itemsPerPage + 1 }} to
-            {{
-              Math.min(
-                (currentPage - 1) * itemsPerPage + paginatedUsers.length,
-                filteredUsers.length
-              )
-            }}
-            of {{ filteredUsers.length }} results
-          </span>
-
           <div
-            class="flex items-center border rounded overflow-hidden shadow-sm"
+            class="text-sm transition-colors duration-200"
+            :class="isDarkMode ? 'text-gray-300' : 'text-gray-600'"
           >
+            Showing
+            <span class="font-medium">
+              {{ (currentPage - 1) * itemsPerPage + 1 }}
+            </span>
+            to
+            <span class="font-medium">
+              {{
+                Math.min(
+                  (currentPage - 1) * itemsPerPage + paginatedUsers.length,
+                  filteredUsers.length
+                )
+              }}
+            </span>
+            of
+            <span class="font-medium">{{ filteredUsers.length }}</span>
+            results
+          </div>
+
+          <div class="flex items-center space-x-2">
             <button
               @click="goToPage(currentPage - 1)"
               :disabled="currentPage === 1"
-              class="px-3 py-1 transition-colors duration-200 disabled:opacity-40"
+              class="p-2 rounded-lg border transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               :class="
                 isDarkMode
-                  ? 'bg-gray-600 text-green-400 hover:bg-gray-500'
-                  : 'bg-white text-green-600 hover:bg-gray-100'
+                  ? 'border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'
+                  : 'border-gray-300 text-gray-600 hover:bg-gray-100'
               "
             >
               <i class="fas fa-chevron-left"></i>
             </button>
 
-            <span
-              class="px-4 py-1.5 text-white text-sm font-semibold select-none transition-colors duration-200"
-              :class="isDarkMode ? 'bg-green-700' : 'bg-green-600'"
-            >
-              {{ currentPage }}
-            </span>
+            <div class="flex items-center space-x-1">
+              <span
+                v-for="page in Math.min(totalPages, 5)"
+                :key="page"
+                class="px-3 py-2 text-sm font-medium rounded-lg cursor-pointer transition-all duration-200"
+                :class="
+                  currentPage === page
+                    ? isDarkMode
+                      ? 'bg-green-600 text-white'
+                      : 'bg-green-600 text-white'
+                    : isDarkMode
+                    ? 'text-gray-300 hover:bg-gray-600'
+                    : 'text-gray-600 hover:bg-gray-100'
+                "
+                @click="goToPage(page)"
+              >
+                {{ page }}
+              </span>
+            </div>
 
             <button
               @click="goToPage(currentPage + 1)"
               :disabled="currentPage === totalPages"
-              class="px-3 py-1 transition-colors duration-200 disabled:opacity-40"
+              class="p-2 rounded-lg border transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
               :class="
                 isDarkMode
-                  ? 'bg-gray-600 text-green-400 hover:bg-gray-500'
-                  : 'bg-white text-green-600 hover:bg-gray-100'
+                  ? 'border-gray-600 text-gray-300 hover:bg-gray-600 hover:text-white'
+                  : 'border-gray-300 text-gray-600 hover:bg-gray-100'
               "
             >
               <i class="fas fa-chevron-right"></i>
@@ -861,62 +1052,137 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Role Change Confirmation Modal -->
+        <!-- Enhanced Role Change Confirmation Modal -->
         <div
           v-if="showRoleConfirmModal"
-          class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
+          class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm transition-all duration-300"
           :class="isDarkMode ? 'bg-black/60' : 'bg-black/40'"
         >
           <div
-            class="p-6 rounded-lg shadow-md w-full max-w-md transition-colors duration-300"
-            :class="isDarkMode ? 'bg-gray-800' : 'bg-white'"
+            class="p-6 rounded-xl shadow-2xl w-full max-w-md mx-4 transition-all duration-300 transform"
+            :class="
+              isDarkMode ? 'bg-gray-800 border border-gray-700' : 'bg-white'
+            "
           >
-            <h3
-              class="text-lg font-bold mb-4 transition-colors duration-200"
-              :class="isDarkMode ? 'text-gray-200' : 'text-gray-800'"
-            >
-              Confirm Role Change
-            </h3>
-            <p
-              class="text-sm mb-6 transition-colors duration-200"
-              :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
-            >
-              Are you sure you want to change the role of
-              <strong
-                >{{ roleChangeTarget?.first_name }}
-                {{ roleChangeTarget?.last_name }}</strong
-              >
-              to <strong class="capitalize">{{ pendingRole }}</strong
-              >?
-            </p>
-            <div class="flex justify-end gap-3">
-              <button
-                @click="showRoleConfirmModal = false"
-                class="px-4 py-2 text-sm rounded transition-colors duration-200"
+            <div class="flex items-center mb-4">
+              <div
+                class="w-10 h-10 rounded-lg flex items-center justify-center mr-3"
                 :class="
                   isDarkMode
-                    ? 'bg-gray-600 text-gray-300 hover:bg-gray-500'
-                    : 'bg-gray-300 text-gray-700 hover:bg-gray-400'
+                    ? 'bg-yellow-900/30 text-yellow-400'
+                    : 'bg-yellow-100 text-yellow-600'
+                "
+              >
+                <i class="fas fa-exclamation-triangle"></i>
+              </div>
+              <h3
+                class="text-lg font-bold transition-colors duration-200"
+                :class="isDarkMode ? 'text-gray-200' : 'text-gray-800'"
+              >
+                Confirm Role Change
+              </h3>
+            </div>
+
+            <div
+              class="p-4 rounded-lg mb-6"
+              :class="
+                isDarkMode
+                  ? 'bg-gray-700/50 border border-gray-600'
+                  : 'bg-gray-50 border border-gray-200'
+              "
+            >
+              <p
+                class="text-sm mb-3 transition-colors duration-200"
+                :class="isDarkMode ? 'text-gray-300' : 'text-gray-700'"
+              >
+                You are about to change the role of:
+              </p>
+              <div class="flex items-center space-x-3">
+                <img
+                  :src="roleChangeTarget?.profile_photo || '/user24.png'"
+                  alt="Profile"
+                  class="w-10 h-10 rounded-full object-cover"
+                  @error="handleImageError"
+                />
+                <div>
+                  <div
+                    class="font-medium"
+                    :class="isDarkMode ? 'text-gray-200' : 'text-gray-800'"
+                  >
+                    {{ roleChangeTarget?.first_name }}
+                    {{ roleChangeTarget?.last_name }}
+                  </div>
+                  <div
+                    class="text-sm"
+                    :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+                  >
+                    {{ roleChangeTarget?.email }}
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-center my-4">
+                <i
+                  class="fas fa-arrow-right text-2xl"
+                  :class="isDarkMode ? 'text-gray-500' : 'text-gray-400'"
+                ></i>
+              </div>
+
+              <div class="text-center">
+                <span
+                  class="text-sm"
+                  :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
+                >
+                  New role:
+                </span>
+                <div
+                  class="inline-flex items-center px-3 py-1 mt-1 text-sm font-medium rounded-full"
+                  :class="
+                    isDarkMode
+                      ? 'bg-green-900/30 text-green-300'
+                      : 'bg-green-100 text-green-800'
+                  "
+                >
+                  <i
+                    class="fas mr-2"
+                    :class="{
+                      'fa-user-shield': pendingRole === 'admin',
+                      'fa-user-cog': pendingRole === 'tabulator',
+                    }"
+                  ></i>
+                  {{ capitalizeRole(pendingRole) }}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex space-x-3">
+              <button
+                @click="showRoleConfirmModal = false"
+                class="flex-1 px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2"
+                :class="
+                  isDarkMode
+                    ? 'bg-gray-600 text-gray-300 hover:bg-gray-500 focus:ring-gray-400'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300 focus:ring-gray-400'
                 "
               >
                 Cancel
               </button>
               <button
                 @click="updateUserRole"
-                class="px-4 py-2 text-sm text-white rounded transition-colors duration-200"
+                class="flex-1 px-4 py-2.5 text-sm font-medium text-white rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2"
                 :class="
                   isDarkMode
-                    ? 'bg-green-700 hover:bg-green-600'
-                    : 'bg-green-600 hover:bg-green-700'
+                    ? 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
+                    : 'bg-green-600 hover:bg-green-700 focus:ring-green-500'
                 "
               >
-                Confirm
+                Confirm Change
               </button>
             </div>
           </div>
         </div>
 
-        <!-- Modals (no changes) -->
+        <!-- Modals -->
         <CreateUserForm
           v-if="showCreateModal"
           @submit="createUser"
@@ -940,21 +1206,62 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-table {
-  width: 100%;
-}
-th,
-td {
-  text-align: left;
+/* Animation classes for dropdown */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
+@keyframes slide-in-from-top-2 {
+  from {
+    transform: translateY(-8px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fade-in 0.2s ease-out, slide-in-from-top-2 0.2s ease-out;
+}
+
+/* Smooth hover animations */
 .card-enter-active,
 .card-leave-active {
   transition: all 0.3s ease;
 }
+
 .card-enter-from,
 .card-leave-to {
   opacity: 0;
   transform: scale(0.95);
+}
+
+/* Rotate chevron animation */
+.rotate-180 {
+  transform: rotate(180deg);
+}
+
+/* Custom scrollbar for better UX */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.5);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.7);
 }
 </style>
