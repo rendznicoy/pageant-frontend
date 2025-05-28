@@ -42,7 +42,7 @@ const navigationLinks = computed(() => {
   const links = [];
 
   // Dashboard
-  const dashboardPath = `/${user.role}/dashboard`;
+  const dashboardPath = `/admin/dashboard`;
   links.push({
     name: "Dashboard",
     path: dashboardPath,

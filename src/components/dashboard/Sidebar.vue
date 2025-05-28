@@ -58,7 +58,7 @@ const navigationItems = computed(() => {
     props.role === "admin"
       ? "/admin/dashboard"
       : props.role === "tabulator"
-      ? "/tabulator/dashboard"
+      ? "/admin/dashboard"
       : "/judge/dashboard";
 
   baseItems.push({
@@ -98,7 +98,7 @@ const navigateToDashboard = () => {
     props.role === "admin"
       ? "/admin/dashboard"
       : props.role === "tabulator"
-      ? "/tabulator/dashboard"
+      ? "/admin/dashboard"
       : "/judge/dashboard";
 
   if (currentPath === dashboardPath) {
