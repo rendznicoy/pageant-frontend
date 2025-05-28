@@ -165,6 +165,8 @@ const filteredUsers = computed(() => {
 // Create user
 const createUser = async (userData) => {
   serverError.value = "";
+  isLoading.value = true; // Add this loading state
+
   try {
     const response = await axiosClient.post("/api/v1/users", userData);
     console.log("User created:", response.data);
@@ -174,23 +176,25 @@ const createUser = async (userData) => {
     // Push new user
     users.value.push(response.data.data);
 
-    // ✅ Close the modal
+    // Close the modal
     showCreateModal.value = false;
 
-    return true;
+    return { success: true };
   } catch (error) {
     console.error("Create user error:", error);
     if (error.response?.status === 422) {
       const errs = error.response.data.errors;
       const firstKey = Object.keys(errs)[0];
       toast.error(`${firstKey}: ${errs[firstKey][0]}`);
-      throw errs; // Still pass for inline display
+      return { success: false, errors: errs };
     } else {
       const fallback =
         error.response?.data?.message || "Failed to create user.";
       toast.error(fallback);
-      throw { message: fallback };
+      return { success: false, message: fallback };
     }
+  } finally {
+    isLoading.value = false;
   }
 };
 
