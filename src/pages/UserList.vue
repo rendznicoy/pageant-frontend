@@ -169,6 +169,8 @@ const filteredUsers = computed(() => {
 // Create user
 const createUser = async (userData) => {
   serverError.value = "";
+  isLoading.value = true;
+
   try {
     const response = await axiosClient.post("/api/v1/users", userData);
     console.log("User created response:", response); // Debug log
