@@ -263,7 +263,7 @@ const handleEditJudgeSubmit = async (e) => {
 
     // Use PATCH method to correct route (remove /edit)
     await axiosClient.patch(
-      `/api/v1/events/${props.eventId}/judges/${judge.judge_id}`,
+      `/api/v1/events/${props.eventId}/judges/${judge.judge_id}/edit`,
       formData,
       {
         headers: {
