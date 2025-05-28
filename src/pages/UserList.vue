@@ -20,10 +20,9 @@ const searchTerm = ref("");
 
 const users = ref([]);
 const filterRole = ref("");
-const sortField = ref("id"); // Default sort field: ID
-const sortDirection = ref("asc"); // Default direction: ascending
+const sortField = ref("id");
+const sortDirection = ref("asc");
 const serverError = ref("");
-const selectedUsers = ref([]); // Track selected user IDs
 const currentPage = ref(1);
 const itemsPerPage = 8;
 const dropdownVisible = ref(null);
@@ -59,51 +58,23 @@ const breadcrumbItems = [
 const showDeleteConfirm = ref(false);
 const userToDelete = ref(null);
 
-// Select All checkbox state
-const allSelected = computed({
-  get() {
-    return (
-      filteredUsers.value.length > 0 &&
-      filteredUsers.value.every((user) =>
-        selectedUsers.value.includes(user.user_id)
-      )
-    );
-  },
-  set(value) {
-    if (value) {
-      selectedUsers.value = filteredUsers.value.map((user) => user.user_id);
-    } else {
-      selectedUsers.value = [];
-    }
-  },
-});
-
-// Some users selected (for indeterminate state)
-const someSelected = computed(
-  () => selectedUsers.value.length > 0 && !allSelected.value
-);
-
 // Fetch users
 const fetchUsers = async () => {
   isLoading.value = true;
   try {
     const params = filterRole.value ? { role: filterRole.value } : {};
     const response = await axiosClient.get("/api/v1/users", { params });
-    users.value = response.data ?? response; // fallback
+    users.value = response.data ?? response;
     if (users.value && users.value.data) {
       users.value = users.value.data;
     }
     console.log("Users fetched:", users.value);
-    // Clear selections for users no longer in the list
-    selectedUsers.value = selectedUsers.value.filter((id) =>
-      users.value.some((user) => user.user_id === id)
-    );
   } catch (error) {
     console.error("Fetch users error:", error);
     if (error.response?.status === 422) {
       throw error.response.data.errors;
     } else {
-      const fallbackMessage = error?.message || "Failed to update user.";
+      const fallbackMessage = error?.message || "Failed to fetch users.";
       serverError.value = error.response?.data?.message || fallbackMessage;
       toast.error(serverError.value);
     }
@@ -113,16 +84,14 @@ const fetchUsers = async () => {
 };
 
 // Filtered and sorted users
-// Filtered and sorted users - FIXED
 const filteredUsers = computed(() => {
   if (!Array.isArray(users.value)) return [];
 
-  // Filter out any undefined/null users first
   let filtered = users.value.filter(
     (user) => user && user.user_id && user.role
   );
 
-  // 🔁 Exclude judges unless explicitly filtered
+  // Exclude judges unless explicitly filtered
   if (filterRole.value === "") {
     filtered = filtered.filter((user) => user.role !== "judge");
   }
@@ -141,7 +110,7 @@ const filteredUsers = computed(() => {
     );
   }
 
-  // 🔁 Custom sorting: Admin > Tabulator (Judges already excluded unless filtered)
+  // Custom sorting: Admin > Tabulator
   filtered.sort((a, b) => {
     const rolePriority = { admin: 0, tabulator: 1, judge: 2 };
     const priorityA = rolePriority[a.role] ?? 99;
@@ -173,25 +142,20 @@ const createUser = async (userData) => {
 
   try {
     const response = await axiosClient.post("/api/v1/users", userData);
-    console.log("User created response:", response); // Debug log
+    console.log("User created response:", response);
 
-    // Safely access the new user data
     const newUser = response?.data?.data || response?.data;
 
     if (!newUser || !newUser.user_id) {
       console.error("Invalid user data received:", response);
       toast.error("User created but response format is invalid");
-      await fetchUsers(); // Refresh the list instead
+      await fetchUsers();
       showCreateModal.value = false;
       return { success: true };
     }
 
     toast.success(response.data?.message || "User created successfully.");
-
-    // Safely push the new user
     users.value.push(newUser);
-
-    // Close the modal
     showCreateModal.value = false;
 
     return { success: true };
@@ -233,8 +197,6 @@ const updateUser = async (userData) => {
   try {
     const payload = { ...userData };
     if (!payload.password) delete payload.password;
-
-    // Remove role if it's judge (to avoid validation error)
     if (payload.role === "judge") delete payload.role;
 
     const response = await axiosClient.patch(
@@ -242,7 +204,6 @@ const updateUser = async (userData) => {
       payload
     );
 
-    // Safely access response structure
     if (!response || !response.user) {
       throw new Error("Invalid response from server");
     }
@@ -271,133 +232,19 @@ const confirmDelete = (user) => {
 const deleteUser = async () => {
   serverError.value = "";
   try {
-    await axiosClient.get("/api/csrf-cookie");
     await axiosClient.delete(`/api/v1/users/${userToDelete.value.user_id}`);
     console.log("User deleted:", userToDelete.value.user_id);
     toast.success("User deleted successfully.");
     users.value = users.value.filter(
       (u) => u.user_id !== userToDelete.value.user_id
     );
-    selectedUsers.value = selectedUsers.value.filter(
-      (id) => id !== userToDelete.value.user_id
-    );
     showDeleteConfirm.value = false;
     userToDelete.value = null;
   } catch (error) {
-    console.error(
-      "Delete user error:",
-      JSON.stringify(error.response?.data, null, 2)
-    );
+    console.error("Delete user error:", error);
     serverError.value =
       error.response?.data?.message || "Failed to delete user.";
     toast.error(serverError.value);
-  }
-};
-
-// Delete selected users
-const deleteSelected = async () => {
-  serverError.value = "";
-  const currentUserId = userStore.user?.user_id;
-  const usersToDelete = selectedUsers.value.filter(
-    (id) => id !== currentUserId
-  );
-
-  if (usersToDelete.length === 0) {
-    toast.error("No valid users selected for deletion.");
-    return;
-  }
-
-  try {
-    await axiosClient.get("/api/csrf-cookie");
-    const response = await axiosClient.post("/api/v1/users/bulk-delete", {
-      user_ids: usersToDelete,
-    });
-    console.log("Bulk delete response:", response.data);
-
-    users.value = users.value.filter(
-      (u) => !response.data.success.includes(u.user_id)
-    );
-    selectedUsers.value = selectedUsers.value.filter(
-      (id) => !response.data.success.includes(id)
-    );
-
-    if (response.data.failed.length === 0) {
-      toast.success("Selected users deleted successfully.");
-    } else {
-      const errorMessage =
-        response.data.failed.length === usersToDelete.length
-          ? "Failed to delete all selected users."
-          : `Failed to delete ${response.data.failed.length} of ${usersToDelete.length} users.`;
-      serverError.value = errorMessage;
-      toast.error(
-        `${errorMessage} ${response.data.failed
-          .map((f) => `User ${f.id}: ${f.message}`)
-          .join("; ")}`
-      );
-    }
-  } catch (error) {
-    console.error(
-      "Bulk delete error:",
-      JSON.stringify(error.response?.data, null, 2)
-    );
-    serverError.value =
-      error.response?.data?.message || "Failed to delete users.";
-    toast.error(serverError.value);
-
-    // Fallback to individual DELETEs
-    const failedDeletions = [];
-    console.log("Falling back to individual DELETEs:", usersToDelete);
-
-    const results = await Promise.allSettled(
-      usersToDelete.map(async (id) => {
-        try {
-          await axiosClient.get("/api/csrf-cookie");
-          await axiosClient.delete(`/api/v1/users/${id}`);
-          return { id, status: "fulfilled" };
-        } catch (error) {
-          console.error(
-            `Failed to delete user ${id}:`,
-            JSON.stringify(error.response?.data, null, 2)
-          );
-          throw { id, error };
-        }
-      })
-    );
-
-    results.forEach((result) => {
-      if (result.status === "rejected") {
-        failedDeletions.push({
-          id: result.reason.id,
-          message:
-            result.reason.error.response?.data?.message ||
-            "Failed to delete user.",
-        });
-      }
-    });
-
-    users.value = users.value.filter(
-      (u) =>
-        !usersToDelete.includes(u.user_id) ||
-        failedDeletions.some((f) => f.id === u.user_id)
-    );
-    selectedUsers.value = selectedUsers.value.filter((id) =>
-      failedDeletions.some((f) => f.id === id)
-    );
-
-    if (failedDeletions.length === 0 && usersToDelete.length > 0) {
-      toast.success("Selected users deleted successfully (fallback).");
-    } else if (failedDeletions.length > 0) {
-      const errorMessage =
-        failedDeletions.length === usersToDelete.length
-          ? "Failed to delete all selected users (fallback)."
-          : `Failed to delete ${failedDeletions.length} of ${usersToDelete.length} users (fallback).`;
-      serverError.value = errorMessage;
-      toast.error(
-        `${errorMessage} ${failedDeletions
-          .map((f) => `User ${f.id}: ${f.message}`)
-          .join("; ")}`
-      );
-    }
   }
 };
 
@@ -405,7 +252,7 @@ const paginatedUsers = computed(() => {
   const start = (currentPage.value - 1) * itemsPerPage;
   return filteredUsers.value
     .slice(start, start + itemsPerPage)
-    .filter((user) => user && user.user_id); // Extra safety check
+    .filter((user) => user && user.user_id);
 });
 
 const totalPages = computed(() =>
@@ -432,7 +279,7 @@ function capitalizeRole(role) {
 }
 
 function confirmRoleChange(user, role) {
-  dropdownVisible.value = null; // 🔁 Close dropdown first
+  dropdownVisible.value = null;
   roleChangeTarget.value = user;
   pendingRole.value = role;
   showRoleConfirmModal.value = true;
@@ -456,14 +303,13 @@ async function updateUserRole() {
   const updatedUser = {
     ...roleChangeTarget.value,
     role: pendingRole.value,
-    password: "", // optional
+    password: "",
   };
 
   try {
     await updateUser(updatedUser);
     toast.success("User role updated.");
 
-    // 🔁 Reset UI states
     dropdownVisible.value = null;
     showRoleConfirmModal.value = false;
     roleChangeTarget.value = null;
@@ -543,20 +389,8 @@ onUnmounted(() => {
               </p>
             </div>
           </div>
+          <!-- Simplified header - only Add User button -->
           <div class="flex space-x-3">
-            <button
-              v-if="selectedUsers.length"
-              @click="deleteSelected"
-              class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 transform hover:scale-105"
-              :class="
-                isDarkMode
-                  ? 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
-                  : 'bg-red-600 hover:bg-red-700 focus:ring-red-500'
-              "
-            >
-              <i class="fas fa-trash mr-2"></i>
-              Delete Selected ({{ selectedUsers.length }})
-            </button>
             <button
               @click="showCreateModal = true"
               class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 transform hover:scale-105"
@@ -700,22 +534,7 @@ onUnmounted(() => {
                   : 'bg-white border-gray-200 hover:shadow-gray-200/50 hover:border-gray-300'
               "
             >
-              <!-- Selection Checkbox -->
-              <div class="absolute top-3 left-3">
-                <input
-                  type="checkbox"
-                  :value="user.user_id"
-                  v-model="selectedUsers"
-                  class="w-4 h-4 rounded border-2 focus:ring-2 transition-colors duration-200"
-                  :class="
-                    isDarkMode
-                      ? 'bg-gray-600 border-gray-500 text-green-500 focus:ring-green-400'
-                      : 'bg-white border-gray-300 text-green-600 focus:ring-green-500'
-                  "
-                />
-              </div>
-
-              <!-- Delete Icon -->
+              <!-- Delete Icon (Top Right) -->
               <div class="absolute top-3 right-3">
                 <button
                   @click="confirmDelete(user)"
@@ -745,7 +564,7 @@ onUnmounted(() => {
                     "
                     @error="handleImageError"
                   />
-                  <!-- Online indicator (optional) -->
+                  <!-- Online indicator -->
                   <div
                     class="absolute -bottom-1 -right-1 w-6 h-6 rounded-full border-2 flex items-center justify-center"
                     :class="
@@ -806,7 +625,7 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- FIXED Role Dropdown -->
+              <!-- Role Dropdown -->
               <div class="relative role-dropdown">
                 <button
                   class="w-full inline-flex items-center justify-center px-4 py-2.5 text-sm font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2"
@@ -840,7 +659,7 @@ onUnmounted(() => {
                   ></i>
                 </button>
 
-                <!-- FIXED Role Options - Now positioned correctly below button -->
+                <!-- Role Options -->
                 <div
                   v-if="dropdownVisible === user.user_id"
                   class="absolute top-full left-0 right-0 z-20 mt-2 border rounded-lg shadow-xl transition-all duration-200 transform origin-top animate-in fade-in slide-in-from-top-2"
@@ -971,7 +790,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Enhanced Pagination Controls -->
+        <!-- Pagination Controls -->
         <div
           v-if="paginatedUsers.length"
           class="border rounded-xl shadow-sm p-4 mt-6 flex flex-col sm:flex-row justify-between items-center gap-4 transition-colors duration-300"
@@ -1052,7 +871,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Enhanced Role Change Confirmation Modal -->
+        <!-- Role Change Confirmation Modal -->
         <div
           v-if="showRoleConfirmModal"
           class="fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm transition-all duration-300"
@@ -1229,24 +1048,10 @@ onUnmounted(() => {
   animation: fade-in 0.2s ease-out, slide-in-from-top-2 0.2s ease-out;
 }
 
-/* Smooth hover animations */
-.card-enter-active,
-.card-leave-active {
-  transition: all 0.3s ease;
-}
-
-.card-enter-from,
-.card-leave-to {
-  opacity: 0;
-  transform: scale(0.95);
-}
-
-/* Rotate chevron animation */
 .rotate-180 {
   transform: rotate(180deg);
 }
 
-/* Custom scrollbar for better UX */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
