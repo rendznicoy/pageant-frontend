@@ -1,4 +1,3 @@
-// JudgesTab.vue
 <script setup>
 import { ref, onMounted, computed, watch } from "vue";
 import { useToast } from "vue-toastification";
@@ -213,10 +212,7 @@ const openEditModal = (judge) => {
     toast.warning("Cannot edit judges when event is active or completed.");
     return;
   }
-  selectedJudge.value = {
-    ...judge,
-    email: judge.email || "", // Preserve existing email for backend validation
-  };
+  selectedJudge.value = { ...judge };
   editPreviewPhoto.value = getImageUrl(judge.profile_photo);
   showEditModal.value = true;
 };
@@ -243,59 +239,45 @@ const handleCreateJudgeSubmit = async (e) => {
 
 const handleEditJudgeSubmit = async (e) => {
   e.preventDefault();
-  const formData = new FormData();
+  const formData = new FormData(e.target);
 
   const judge = selectedJudge.value;
 
-  // Add required fields
-  formData.append("first_name", judge.first_name || "");
-  formData.append("last_name", judge.last_name || "");
-  formData.append("email", judge.email || ""); // Send existing email (hidden from form)
+  // Manually set form values
+  formData.set("first_name", judge.first_name || "");
+  formData.set("last_name", judge.last_name || "");
+  formData.set("event_id", props.eventId);
+  formData.set("judge_id", judge.judge_id);
+  formData.set("user_id", judge.user_id);
+  formData.set("_method", "PATCH"); // Laravel expects this for PATCH via POST
 
   // Attach photo file if selected
   const fileInput = e.target.querySelector('input[name="photo"]');
   if (fileInput?.files?.[0]) {
-    formData.append("photo", fileInput.files[0]);
+    formData.set("photo", fileInput.files[0]);
   }
 
-  try {
-    loading.value = true;
-
-    // Use PATCH method to correct route (remove /edit)
-    await axiosClient.patch(
-      `/api/v1/events/${props.eventId}/judges/${judge.judge_id}/edit`,
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      }
-    );
-
-    toast.success("Judge updated successfully!");
-    showEditModal.value = false;
-    await fetchJudges();
-  } catch (error) {
-    console.error("Update error:", error.response?.data);
-    toast.error(error.response?.data?.message || "Failed to update judge.");
-  } finally {
-    loading.value = false;
+  // Debug: see what you're sending
+  for (let [key, val] of formData.entries()) {
+    console.log(key, val);
   }
+
+  // Send as POST request with method override
+  await axiosClient.post(
+    `/api/v1/events/${props.eventId}/judges/${judge.judge_id}/edit`,
+    formData
+  );
+
+  toast.success("Judge updated successfully!");
+  showEditModal.value = false;
+  await fetchJudges();
 };
 
 const getImageUrl = (photo) => {
   if (!photo) return "/vsu.png";
-
-  // If it's already a full URL (Cloudinary or other external), use it as-is
-  if (photo.startsWith("http://") || photo.startsWith("https://")) {
-    return `${photo}?t=${Date.now()}`;
-  }
-
-  // If it's a local storage path, construct the full URL
-  const fullPath = photo.startsWith("/storage/")
-    ? `${BACKEND_BASE_URL}${photo}`
-    : `${BACKEND_BASE_URL}/storage/${photo}`;
-  return `${fullPath}?t=${Date.now()}`;
+  // Use as-is if it's already an absolute URL
+  if (photo.startsWith("http")) return `${photo}?t=${Date.now()}`;
+  return `${BACKEND_BASE_URL}/storage/${photo}?t=${Date.now()}`;
 };
 // Watch for event status changes
 watch(eventStatus, (newStatus) => {

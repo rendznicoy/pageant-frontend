@@ -1,4 +1,3 @@
-// CandidatesTab.vue
 <script setup>
 import { ref, onMounted, computed, watch, watchEffect } from "vue";
 import { useDarkModeStore } from "@/stores/darkMode"; // Add this import
@@ -176,12 +175,7 @@ const sendCandidateRequest = async (url, formData, method = "post") => {
 
   loading.value = true;
   try {
-    // Use proper headers for multipart data
-    const response = await axiosClient[method](url, formData, {
-      headers: {
-        "Content-Type": "multipart/form-data",
-      },
-    });
+    await axiosClient[method](url, formData);
 
     toast.success("Candidate saved successfully!");
     showCreateModal.value = false;
@@ -237,39 +231,31 @@ const submitCandidate = async (event, isEdit = false) => {
   if (isEdit) {
     const candidate = selectedCandidate.value;
 
-    // Add required fields
-    formData.append("first_name", candidate.first_name || "");
-    formData.append("last_name", candidate.last_name || "");
-    formData.append("candidate_number", candidate.candidate_number || "");
-    formData.append("sex", candidate.sex || "");
-    formData.append("team", candidate.team || "");
-    formData.append("is_active", candidate.is_active ? "1" : "0");
+    formData.set("first_name", candidate.first_name || "");
+    formData.set("last_name", candidate.last_name || "");
+    formData.set("candidate_number", candidate.candidate_number || "");
+    formData.set("sex", candidate.sex || "");
+    formData.set("team", candidate.team || "");
+    formData.set("is_active", candidate.is_active ? "true" : "false");
+    formData.set("event_id", props.eventId);
+    formData.set("candidate_id", candidate.candidate_id);
+    formData.set("_method", "PATCH");
 
-    // Photo will be automatically included from file input
+    const fileInput = event.target.querySelector('input[name="photo"]');
+    if (fileInput?.files?.[0]) {
+      formData.set("photo", fileInput.files[0]);
+    }
 
-    // Use correct route and method
     await sendCandidateRequest(
-      `/api/v1/events/${props.eventId}/candidates/${candidate.candidate_id}`,
+      `/api/v1/events/${props.eventId}/candidates/${candidate.candidate_id}/edit`,
       formData,
-      "patch"
+      "post"
     );
   } else {
-    // For create, ensure required fields are set
-    formData.append("event_id", props.eventId);
+    formData.set("event_id", props.eventId);
 
-    // For non-standard divisions, ensure sex is set correctly
-    if (props.division !== "standard") {
-      formData.set("sex", props.division === "male-only" ? "M" : "F");
-    }
-
-    // Set default is_active
-    if (!formData.has("is_active")) {
-      formData.append("is_active", "1");
-    }
-
-    // Use correct route
     await sendCandidateRequest(
-      `/api/v1/events/${props.eventId}/candidates`,
+      `/api/v1/events/${props.eventId}/candidates/create`,
       formData,
       "post"
     );
@@ -991,10 +977,7 @@ watchEffect(() => {
           </button>
         </div>
 
-        <form
-          @submit.prevent="submitCandidate($event, false)"
-          class="space-y-6"
-        >
+        <form @submit="(e) => submitCandidate(e, false)" class="space-y-6">
           <!-- Photo Upload -->
           <div>
             <label
@@ -1261,7 +1244,7 @@ watchEffect(() => {
           </button>
         </div>
 
-        <form @submit.prevent="submitCandidate($event, true)" class="space-y-6">
+        <form @submit="(e) => submitCandidate(e, true)" class="space-y-6">
           <!-- Photo Upload -->
           <div>
             <label
