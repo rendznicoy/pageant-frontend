@@ -48,6 +48,14 @@ const showFinalizeEventModal = ref(false);
 const showPreview = ref(false);
 const previewUrl = ref("");
 
+const refreshEvent = async () => {
+  try {
+    event.value = await eventStore.fetchEvent(eventId);
+  } catch (err) {
+    console.error("Failed to refresh event:", err);
+  }
+};
+
 const BACKEND_BASE_URL =
   import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
 
@@ -132,7 +140,7 @@ const handleConfirmDivisionChange = async (newDivision) => {
       division: newDivision,
     });
 
-    event.value = await eventStore.fetchEvent(eventId);
+    await refreshEvent(); // Use the new refresh method
     toast.success(
       `Division changed to ${newDivision.replace(
         "-",
@@ -184,9 +192,9 @@ const updateCoverPhoto = async (file) => {
     });
 
     toast.success("Cover photo updated successfully.");
-    event.value = await eventStore.fetchEvent(eventId);
+    await refreshEvent(); // Use the new refresh method
     imageTimestamp.value = Date.now();
-    showCoverPhotoModal.value = false; // ✅ Close modal
+    showCoverPhotoModal.value = false;
   } catch (error) {
     console.error(
       "Cover photo update error:",
@@ -202,7 +210,7 @@ const updateEventDetails = async (formData) => {
 
   try {
     await eventStore.updateEvent(route.params.id, formData);
-    event.value = await eventStore.fetchEvent(route.params.id);
+    await refreshEvent(); // Use the new refresh method
     toast.success("Event updated successfully!");
     imageTimestamp.value = Date.now();
     showEditEventModal.value = false;
@@ -220,7 +228,7 @@ const handleConfirmReset = async () => {
     await eventStore.resetEvent(eventId);
     toast.success("Event reset successfully");
     showResetEventModal.value = false;
-    event.value = await eventStore.fetchEvent(eventId);
+    await refreshEvent(); // Use the new refresh method
   } catch (err) {
     toast.error(`${err.message}`);
   } finally {
@@ -373,7 +381,7 @@ const handleConfirmStart = async () => {
     isLoading.value = true;
     await eventStore.startEvent(eventId);
     toast.success("Event started successfully");
-    event.value = await eventStore.fetchEvent(eventId);
+    await refreshEvent(); // Use the new refresh method
   } catch (err) {
     toast.error(`Failed to start event: ${err.message}`);
   } finally {
@@ -387,7 +395,7 @@ const handleConfirmFinalize = async () => {
     isLoading.value = true;
     const response = await eventStore.finalizeEvent(eventId);
     toast.success("Event finalized successfully");
-    event.value = await eventStore.fetchEvent(eventId);
+    await refreshEvent(); // Use the new refresh method
   } catch (err) {
     console.error("Finalize error:", err);
     const serverMessage =
@@ -437,8 +445,14 @@ onUnmounted(() => {
   closePreview(); // Clean up PDF blob URL
 });
 
-watch(activeTab, (newTab) => {
+watch(activeTab, async (newTab, oldTab) => {
+  // Update the route query
   router.replace({ query: { ...route.query, tab: newTab } });
+
+  // Refresh event data when switching to overview tab
+  if (newTab === "overview" && oldTab !== "overview") {
+    await refreshEvent();
+  }
 });
 </script>
 
