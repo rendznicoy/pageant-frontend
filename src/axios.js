@@ -16,6 +16,7 @@ const fetchCsrfToken = async () => {
   try {
     await axios.get("/api/csrf-cookie", {
       baseURL: axiosClient.defaults.baseURL,
+      withCredentials: true, // Add this line
     });
     console.log("CSRF token fetched successfully");
   } catch (error) {
