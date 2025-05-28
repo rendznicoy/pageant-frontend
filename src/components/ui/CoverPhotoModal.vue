@@ -329,35 +329,38 @@ watch(
           </div>
         </div>
 
-        <!-- Action Buttons -->
-        <div class="flex justify-end space-x-3 pt-4">
-          <button
-            @click="handleClose"
-            class="px-6 py-3 text-sm font-medium rounded-lg transition-all duration-200"
-            :class="
-              isDarkMode
-                ? 'text-gray-300 bg-gray-700 border border-gray-600 hover:bg-gray-600'
-                : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
-            "
-            :disabled="loading"
-          >
-            Cancel
-          </button>
-          <button
-            @click="handleSave"
-            :disabled="loading || !file"
-            class="px-6 py-3 text-sm font-medium rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-            :class="
-              isDarkMode
-                ? 'text-blue-100 bg-blue-700 border border-transparent hover:bg-blue-600'
-                : 'text-white bg-blue-600 border border-transparent hover:bg-blue-700'
-            "
-          >
-            <i v-if="loading" class="fas fa-spinner fa-spin"></i>
-            <i v-else class="fas fa-upload"></i>
-            <span>{{ loading ? "Uploading..." : "Upload Photo" }}</span>
-          </button>
-        </div>
+        <template>
+          <!-- Action Buttons -->
+          <div class="flex justify-end space-x-3 pt-4">
+            <button
+              @click="handleClose"
+              class="px-6 py-3 text-sm font-medium rounded-lg transition-all duration-200"
+              :class="
+                isDarkMode
+                  ? 'text-gray-300 bg-gray-700 border border-gray-600 hover:bg-gray-600'
+                  : 'text-gray-700 bg-white border border-gray-300 hover:bg-gray-50'
+              "
+              :disabled="loading"
+            >
+              Cancel
+            </button>
+
+            <button
+              @click="handleSave"
+              :disabled="loading || !file"
+              class="px-6 py-3 text-sm font-medium rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 min-w-[140px]"
+              :class="
+                isDarkMode
+                  ? 'text-blue-100 bg-blue-700 border border-transparent hover:bg-blue-600'
+                  : 'text-white bg-blue-600 border border-transparent hover:bg-blue-700'
+              "
+            >
+              <i v-if="loading" class="fas fa-spinner fa-spin"></i>
+              <i v-else class="fas fa-upload"></i>
+              <span>{{ loading ? "Uploading..." : "Upload Photo" }}</span>
+            </button>
+          </div>
+        </template>
       </div>
     </div>
   </div>

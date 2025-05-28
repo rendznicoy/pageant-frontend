@@ -959,7 +959,7 @@ onMounted(async () => {
             >
               <i v-if="loading" class="fas fa-spinner fa-spin"></i>
               <i v-else class="fas fa-save"></i>
-              {{ loading ? "Updating..." : "Update Judge" }}
+              <span>{{ loading ? "Updating..." : "Update Judge" }}</span>
             </button>
           </div>
         </form>
