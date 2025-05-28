@@ -427,7 +427,7 @@ onMounted(() => {
   initializeDarkMode();
   if (props.eventId) {
     fetchScores();
-    interval = setInterval(fetchScores, 60000);
+    interval = setInterval(fetchScores, 120000);
   }
 });
 
@@ -471,10 +471,12 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="flex space-x-2">
+        <div
+          class="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-2"
+        >
           <button
             @click="fetchScores"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            class="flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg w-full sm:w-auto"
             :class="
               isDarkMode
                 ? 'bg-gray-700 hover:bg-gray-600 text-gray-200'
@@ -483,11 +485,13 @@ onUnmounted(() => {
             :disabled="loading"
           >
             <i class="fas fa-sync-alt" :class="{ 'fa-spin': loading }"></i>
-            {{ loading ? "Refreshing..." : "Refresh" }}
+            <span class="text-sm sm:text-base">{{
+              loading ? "Refreshing..." : "Refresh"
+            }}</span>
           </button>
           <button
             @click="exportScores"
-            class="flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg"
+            class="flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 shadow-md hover:shadow-lg w-full sm:w-auto"
             :class="
               isDarkMode
                 ? 'bg-green-700 hover:bg-green-600 text-green-100'
@@ -496,7 +500,9 @@ onUnmounted(() => {
             :disabled="loading || !filteredScores.length"
           >
             <i class="fas fa-download"></i>
-            {{ loading ? "Exporting..." : "Export CSV" }}
+            <span class="text-sm sm:text-base">{{
+              loading ? "Exporting..." : "Export CSV"
+            }}</span>
           </button>
         </div>
       </div>
@@ -683,7 +689,7 @@ onUnmounted(() => {
       :class="isDarkMode ? 'text-gray-400' : 'text-gray-600'"
     >
       <i class="fas fa-sync-alt fa-spin mr-2 opacity-50"></i>
-      Auto-refreshing every minute
+      Auto-refreshing every 2 minutes
     </div>
 
     <!-- Loading State -->
