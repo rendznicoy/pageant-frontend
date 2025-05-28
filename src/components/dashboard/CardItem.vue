@@ -46,6 +46,13 @@ const isDeleteDisabled = computed(() => {
 
 const getImageUrl = (coverPhoto) => {
   if (!coverPhoto) return "/vsu.png";
+
+  // If it's already a full URL (starts with http), use it as-is
+  if (coverPhoto.startsWith("http://") || coverPhoto.startsWith("https://")) {
+    return `${coverPhoto}?t=${Date.now()}`;
+  }
+
+  // If it's a local storage path, construct the full URL
   const path = coverPhoto.startsWith("/storage/")
     ? coverPhoto
     : `/storage/${coverPhoto}`;
