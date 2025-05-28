@@ -27,15 +27,13 @@ const { redirectToDashboard } = useRoleRouter();
 const isDarkMode = computed(() => darkModeStore.isDarkMode);
 
 async function handleLogin(event) {
-  event.preventDefault(); // Ensure form submission is fully controlled
+  event.preventDefault();
   formSubmitted.value = true;
 
-  // Client-side validation
   if (!data.value.username || !data.value.password) {
     loginError.value = "Please fill in both username and password.";
-    // Prevent browser from autofocusing the first invalid field
     document.activeElement.blur();
-    return; // Don't submit if fields are empty
+    return;
   }
 
   loginError.value = "";
@@ -43,7 +41,8 @@ async function handleLogin(event) {
   isCheckingAuth.value = true;
 
   try {
-    await axiosClient.get("/api/csrf-cookie");
+    // Use the standard Sanctum CSRF cookie route
+    await axiosClient.get("/sanctum/csrf-cookie");
 
     const response = await axiosClient.post("/api/v1/login", {
       username: data.value.username,
@@ -51,6 +50,7 @@ async function handleLogin(event) {
       remember: data.value.remember,
     });
 
+    // Rest of your login logic remains the same...
     const user = response?.data?.user;
 
     if (!user) {
@@ -68,11 +68,10 @@ async function handleLogin(event) {
 
     if (user.role) {
       try {
-        // Both admin and tabulator go to admin dashboard
         if (user.role === "admin" || user.role === "tabulator") {
           router.push("/admin/dashboard");
         } else {
-          redirectToDashboard(user.role); // For other roles like judge
+          redirectToDashboard(user.role);
         }
       } catch (err) {
         loginError.value = "Invalid user role. Please contact support.";

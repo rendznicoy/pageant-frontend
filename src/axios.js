@@ -14,13 +14,24 @@ const axiosClient = axios.create({
 
 const fetchCsrfToken = async () => {
   try {
-    await axios.get("/api/csrf-cookie", {
+    // Try the standard Sanctum route first
+    await axios.get("/sanctum/csrf-cookie", {
       baseURL: axiosClient.defaults.baseURL,
-      withCredentials: true, // Add this line
+      withCredentials: true,
     });
     console.log("CSRF token fetched successfully");
   } catch (error) {
     console.error("Error fetching CSRF token:", error);
+    // Fallback to custom route if needed
+    try {
+      await axios.get("/api/csrf-cookie", {
+        baseURL: axiosClient.defaults.baseURL,
+        withCredentials: true,
+      });
+      console.log("CSRF token fetched successfully (fallback)");
+    } catch (fallbackError) {
+      console.error("Error fetching CSRF token (fallback):", fallbackError);
+    }
   }
 };
 
