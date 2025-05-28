@@ -243,13 +243,12 @@ const handleEditJudgeSubmit = async (e) => {
 
   const judge = selectedJudge.value;
 
-  // Manually set form values
+  // Set form values
   formData.set("first_name", judge.first_name || "");
   formData.set("last_name", judge.last_name || "");
   formData.set("event_id", props.eventId);
   formData.set("judge_id", judge.judge_id);
   formData.set("user_id", judge.user_id);
-  formData.set("_method", "PATCH"); // Laravel expects this for PATCH via POST
 
   // Attach photo file if selected
   const fileInput = e.target.querySelector('input[name="photo"]');
@@ -257,20 +256,12 @@ const handleEditJudgeSubmit = async (e) => {
     formData.set("photo", fileInput.files[0]);
   }
 
-  // Debug: see what you're sending
-  for (let [key, val] of formData.entries()) {
-    console.log(key, val);
+  try {
+    await updateJudge(formData);
+  } catch (error) {
+    console.error("Error updating judge:", error);
+    toast.error(error.response?.data?.message || "Failed to update judge.");
   }
-
-  // Send as POST request with method override
-  await axiosClient.post(
-    `/api/v1/events/${props.eventId}/judges/${judge.judge_id}/edit`,
-    formData
-  );
-
-  toast.success("Judge updated successfully!");
-  showEditModal.value = false;
-  await fetchJudges();
 };
 
 const getImageUrl = (photo) => {
