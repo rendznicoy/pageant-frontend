@@ -2,7 +2,7 @@ import axios from "axios";
 import router from "./router.js";
 
 const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_URL,
+  baseURL: import.meta.env.VITE_API_BASE_URL,
   withCredentials: true, // default for most requests
   withXSRFToken: true,
   headers: {
@@ -139,7 +139,7 @@ axiosClient.interceptors.response.use(
     if (error.response?.status === 401 || error.response?.status === 403) {
       // Skip auth error handling for login endpoints
       const isLoginEndpoint =
-        error.config?.url?.includes("/login") ||
+        error.config?.url?.includes("/login/admin") ||
         error.config?.url?.includes("/csrf-cookie");
 
       if (!isLoginEndpoint) {
