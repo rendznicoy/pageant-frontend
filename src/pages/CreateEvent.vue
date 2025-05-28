@@ -159,7 +159,10 @@ const createEvent = async () => {
     });
 
     await eventStore.fetchEvents(true);
-    router.push("/admin/dashboard");
+    const user = userStore.currentUser; // or however you access current user
+    const redirectPath =
+      user.role === "admin" ? "/admin/dashboard" : "/tabulator/dashboard";
+    router.push(redirectPath);
   } catch (error) {
     // Dismiss loading toast
     toast.dismiss(loadingToastId);
