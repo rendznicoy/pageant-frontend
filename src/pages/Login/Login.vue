@@ -132,7 +132,15 @@ onMounted(async () => {
       // Immediately redirect without showing the form
       if (userStore.user.role) {
         try {
-          redirectToDashboard(userStore.user.role);
+          // Both admin and tabulator go to admin dashboard
+          if (
+            userStore.user.role === "admin" ||
+            userStore.user.role === "tabulator"
+          ) {
+            router.push("/admin/dashboard");
+          } else {
+            redirectToDashboard(userStore.user.role); // For other roles like judge
+          }
           return; // Exit early, don't continue with the rest
         } catch (err) {
           loginError.value = "Invalid user role. Please contact support.";
