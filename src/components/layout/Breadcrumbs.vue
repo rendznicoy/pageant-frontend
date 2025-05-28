@@ -30,14 +30,14 @@ const getDashboardRoute = () => {
     case "admin":
       return "/admin/dashboard";
     case "tabulator":
-      return "/tabulator/dashboard";
+      return "/admin/dashboard";
     case "judge":
       return "/judge/dashboard";
     default:
       // Fallback: try to determine from current route
       const currentRoute = router.currentRoute.value.path;
       if (currentRoute.includes("/admin/")) return "/admin/dashboard";
-      if (currentRoute.includes("/tabulator/")) return "/tabulator/dashboard";
+      if (currentRoute.includes("/tabulator/")) return "/admin/dashboard";
       if (currentRoute.includes("/judge/")) return "/judge/dashboard";
       return "/admin/dashboard";
   }
@@ -66,7 +66,7 @@ const navigate = (to, label) => {
     // Check if clicking "Home" or "Dashboard" on any dashboard route
     const isDashboardRoute =
       to === "/admin/dashboard" ||
-      to === "/tabulator/dashboard" ||
+      to === "/admin/dashboard" ||
       to === "/judge/dashboard";
 
     if ((label === "Home" || label === "Dashboard") && isDashboardRoute) {
