@@ -4,8 +4,9 @@ import { useDarkModeStore } from "@/stores/darkMode";
 import { useToast } from "vue-toastification";
 
 const toast = useToast();
+const darkModeStore = useDarkModeStore();
 
-// Reactive dark mode - CRITICAL: This is what was missing
+// Fix: Move darkModeStore before computed
 const isDarkMode = computed(() => darkModeStore.isDarkMode);
 
 const props = defineProps({
@@ -24,15 +25,15 @@ const newUser = ref({
   password_confirmation: "",
   first_name: "",
   last_name: "",
-  role: "admin", // ← restored default
+  role: "admin",
 });
 
 const showPassword = ref(false);
 const showConfirmPassword = ref(false);
 const formErrors = ref({});
-const darkModeStore = useDarkModeStore();
+const isSubmitting = ref(false); // Add this to track submission state
 
-// Validation rules
+// Validation rules (keep existing)
 const validateField = (field, value) => {
   switch (field) {
     case "username":
@@ -77,36 +78,6 @@ const validateField = (field, value) => {
   }
 };
 
-// Check required fields
-const checkRequiredFields = () => {
-  const requiredFields = [
-    "username",
-    "email",
-    "password",
-    "password_confirmation",
-    "first_name",
-    "last_name",
-  ];
-
-  let missing = false;
-
-  requiredFields.forEach((key) => {
-    if (!newUser.value[key]) {
-      formErrors.value[key] = `${key.replace(/_/g, " ")} is required.`;
-      missing = true;
-    } else {
-      formErrors.value[key] = "";
-    }
-  });
-
-  if (missing) {
-    toast.error("Please fill in all required fields.");
-    return false;
-  }
-
-  return true;
-};
-
 // Validate all fields
 const validateForm = () => {
   formErrors.value = {
@@ -138,9 +109,11 @@ const toggleConfirmPassword = () => {
   showConfirmPassword.value = !showConfirmPassword.value;
 };
 
-// Submit form
+// Submit form - FIXED
 const submitForm = async () => {
-  // Manually validate each required field first
+  if (isSubmitting.value) return; // Prevent double submission
+
+  // Validate first
   Object.keys(newUser.value).forEach((key) => {
     formErrors.value[key] = validateField(key, newUser.value[key]);
   });
@@ -153,15 +126,22 @@ const submitForm = async () => {
     return;
   }
 
+  isSubmitting.value = true;
+
   try {
+    // Just emit the data - let parent handle the async operation
     await emit("submit", { ...newUser.value });
-  } catch (serverErrors) {
-    if (typeof serverErrors === "object") {
-      formErrors.value = serverErrors;
+    // Parent will close modal on success, so we don't need to do anything here
+  } catch (error) {
+    console.error("Submit error:", error);
+    if (typeof error === "object" && error.errors) {
+      formErrors.value = error.errors;
       toast.error("Validation failed.");
     } else {
-      toast.error("Unexpected error.");
+      toast.error("Failed to create user.");
     }
+  } finally {
+    isSubmitting.value = false;
   }
 };
 
@@ -179,6 +159,7 @@ const resetForm = () => {
   formErrors.value = {};
   showPassword.value = false;
   showConfirmPassword.value = false;
+  isSubmitting.value = false;
 };
 
 // Computed property to disable submit button
@@ -193,6 +174,7 @@ const isSubmitDisabled = computed(() => {
     "role",
   ];
   return (
+    isSubmitting.value || // Add this condition
     required.some((key) => !newUser.value[key]) ||
     Object.values(formErrors.value).some((err) => !!err)
   );
@@ -384,7 +366,7 @@ const isSubmitDisabled = computed(() => {
             "
             :disabled="isSubmitDisabled"
           >
-            {{ isSubmitDisabled ? "Processing..." : "Create User" }}
+            {{ props.isLoading ? "Creating..." : "Create User" }}
           </button>
         </div>
       </form>
