@@ -113,10 +113,14 @@ const fetchUsers = async () => {
 };
 
 // Filtered and sorted users
+// Filtered and sorted users - FIXED
 const filteredUsers = computed(() => {
   if (!Array.isArray(users.value)) return [];
 
-  let filtered = [...users.value];
+  // Filter out any undefined/null users first
+  let filtered = users.value.filter(
+    (user) => user && user.user_id && user.role
+  );
 
   // 🔁 Exclude judges unless explicitly filtered
   if (filterRole.value === "") {
@@ -131,9 +135,9 @@ const filteredUsers = computed(() => {
     const term = searchTerm.value.toLowerCase();
     filtered = filtered.filter(
       (u) =>
-        u.first_name.toLowerCase().includes(term) ||
-        u.last_name.toLowerCase().includes(term) ||
-        u.email.toLowerCase().includes(term)
+        (u.first_name || "").toLowerCase().includes(term) ||
+        (u.last_name || "").toLowerCase().includes(term) ||
+        (u.email || "").toLowerCase().includes(term)
     );
   }
 
@@ -147,14 +151,14 @@ const filteredUsers = computed(() => {
 
     // Secondary sort by name or ID
     if (sortField.value === "name") {
-      const nameA = `${a.first_name} ${a.last_name}`.toLowerCase();
-      const nameB = `${b.first_name} ${b.last_name}`.toLowerCase();
+      const nameA = `${a.first_name || ""} ${a.last_name || ""}`.toLowerCase();
+      const nameB = `${b.first_name || ""} ${b.last_name || ""}`.toLowerCase();
       return sortDirection.value === "asc"
         ? nameA.localeCompare(nameB)
         : nameB.localeCompare(nameA);
     } else {
-      const valueA = a.user_id;
-      const valueB = b.user_id;
+      const valueA = a.user_id || 0;
+      const valueB = b.user_id || 0;
       return sortDirection.value === "asc" ? valueA - valueB : valueB - valueA;
     }
   });
@@ -165,32 +169,47 @@ const filteredUsers = computed(() => {
 // Create user
 const createUser = async (userData) => {
   serverError.value = "";
+  isLoading.value = true;
+
   try {
     const response = await axiosClient.post("/api/v1/users", userData);
-    console.log("User created:", response.data);
+    console.log("User created response:", response); // Debug log
 
-    toast.success(response.data.message || "User created successfully.");
+    // Safely access the new user data
+    const newUser = response?.data?.data || response?.data;
 
-    // Push new user
-    users.value.push(response.data.data);
+    if (!newUser || !newUser.user_id) {
+      console.error("Invalid user data received:", response);
+      toast.error("User created but response format is invalid");
+      await fetchUsers(); // Refresh the list instead
+      showCreateModal.value = false;
+      return { success: true };
+    }
 
-    // ✅ Close the modal
+    toast.success(response.data?.message || "User created successfully.");
+
+    // Safely push the new user
+    users.value.push(newUser);
+
+    // Close the modal
     showCreateModal.value = false;
 
-    return true;
+    return { success: true };
   } catch (error) {
     console.error("Create user error:", error);
     if (error.response?.status === 422) {
       const errs = error.response.data.errors;
       const firstKey = Object.keys(errs)[0];
       toast.error(`${firstKey}: ${errs[firstKey][0]}`);
-      throw errs; // Still pass for inline display
+      return { success: false, errors: errs };
     } else {
       const fallback =
         error.response?.data?.message || "Failed to create user.";
       toast.error(fallback);
-      throw { message: fallback };
+      return { success: false, message: fallback };
     }
+  } finally {
+    isLoading.value = false;
   }
 };
 
@@ -384,7 +403,9 @@ const deleteSelected = async () => {
 
 const paginatedUsers = computed(() => {
   const start = (currentPage.value - 1) * itemsPerPage;
-  return filteredUsers.value.slice(start, start + itemsPerPage).filter(Boolean); // Filter out undefined/null
+  return filteredUsers.value
+    .slice(start, start + itemsPerPage)
+    .filter((user) => user && user.user_id); // Extra safety check
 });
 
 const totalPages = computed(() =>
