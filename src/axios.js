@@ -1,9 +1,10 @@
+// axios.js
 import axios from "axios";
 import router from "./router.js";
 
 const axiosClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL,
-  withCredentials: true, // default for most requests
+  withCredentials: true, // Default for session-based auth
   withXSRFToken: true,
   headers: {
     "X-Requested-With": "XMLHttpRequest",
@@ -14,7 +15,6 @@ const axiosClient = axios.create({
 
 const fetchCsrfToken = async () => {
   try {
-    // Try the standard Sanctum route first
     await axios.get("/sanctum/csrf-cookie", {
       baseURL: axiosClient.defaults.baseURL,
       withCredentials: true,
@@ -22,82 +22,68 @@ const fetchCsrfToken = async () => {
     console.log("CSRF token fetched successfully");
   } catch (error) {
     console.error("Error fetching CSRF token:", error);
-    // Fallback to custom route if needed
-    try {
-      await axios.get("/api/csrf-cookie", {
-        baseURL: axiosClient.defaults.baseURL,
-        withCredentials: true,
-      });
-      console.log("CSRF token fetched successfully (fallback)");
-    } catch (fallbackError) {
-      console.error("Error fetching CSRF token (fallback):", fallbackError);
-    }
   }
 };
 
 axiosClient.interceptors.request.use(async (config) => {
-  // Disable withCredentials if session is a judge token-based session
-  if (localStorage.getItem("judgeSession") === "true") {
+  // Check if this is a judge session (token-based)
+  const isJudgeSession = localStorage.getItem("judgeSession") === "true";
+
+  if (isJudgeSession) {
+    // For judge sessions, use token-based auth
     config.withCredentials = false;
-  }
-
-  // Fetch CSRF token for unsafe requests if not already present
-  if (
-    config?.method &&
-    ["post", "put", "patch", "delete"].includes(config.method) &&
-    localStorage.getItem("judgeSession") !== "true"
-  ) {
-    const xsrfToken = document.cookie
-      .split("; ")
-      .find((row) => row.startsWith("XSRF-TOKEN="))
-      ?.split("=")[1];
-    if (!xsrfToken) {
-      await fetchCsrfToken();
+    const token = localStorage.getItem("token");
+    if (token) {
+      config.headers["Authorization"] = `Bearer ${token}`;
+      console.log("Added judge token to request");
+    } else {
+      console.warn("No judge token found for judge session");
     }
-  }
-
-  const token = localStorage.getItem("token");
-  if (token) {
-    axiosClient.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-    console.log("Added token to request:", token, "URL:", config.url);
   } else {
-    console.warn("No token found for request:", config.url ?? "unknown URL");
-  }
+    // For admin/tabulator sessions, use session-based auth (cookies)
+    config.withCredentials = true;
 
-  if (config.data instanceof FormData) {
-    config.headers["Content-Type"] = "multipart/form-data";
-    console.log("FormData payload:");
-    for (let [key, value] of config.data.entries()) {
-      console.log(
-        `  ${key}:`,
-        value instanceof File ? `[File: ${value.name}]` : value
-      );
+    // Remove any Authorization header that might have been set previously
+    delete config.headers["Authorization"];
+    delete axiosClient.defaults.headers.common["Authorization"];
+
+    // Fetch CSRF token for unsafe requests if not already present
+    if (
+      config?.method &&
+      ["post", "put", "patch", "delete"].includes(config.method)
+    ) {
+      const xsrfToken = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("XSRF-TOKEN="))
+        ?.split("=")[1];
+      if (!xsrfToken) {
+        await fetchCsrfToken();
+      }
     }
-  }
 
-  if (
-    config.url !== "/api/v1/login/judge" &&
-    config.withCredentials !== false &&
-    localStorage.getItem("judgeSession") !== "true"
-  ) {
+    // Add XSRF token to headers for session-based requests
     const xsrfToken = document.cookie
       .split("; ")
       .find((row) => row.startsWith("XSRF-TOKEN="))
       ?.split("=")[1];
     if (xsrfToken) {
       config.headers["X-XSRF-TOKEN"] = decodeURIComponent(xsrfToken);
-      console.log("Added XSRF-TOKEN to request:", xsrfToken);
+      console.log("Added XSRF-TOKEN for session-based request");
     }
+  }
+
+  if (config.data instanceof FormData) {
+    config.headers["Content-Type"] = "multipart/form-data";
   }
 
   return config;
 });
 
-// Add this global auth error handler
+// Auth error handler
 let isHandlingAuthError = false;
 
 const handleAuthError = () => {
-  if (isHandlingAuthError) return; // Prevent multiple simultaneous calls
+  if (isHandlingAuthError) return;
   isHandlingAuthError = true;
 
   console.info("Authentication error - clearing all auth data");
@@ -107,7 +93,7 @@ const handleAuthError = () => {
   localStorage.removeItem("judgeSession");
   delete axiosClient.defaults.headers.common["Authorization"];
 
-  // Clear user store if available (dynamic import to avoid circular dependency)
+  // Clear user store if available
   import("@/stores/user")
     .then(({ useUserStore }) => {
       const userStore = useUserStore();
@@ -149,15 +135,15 @@ axiosClient.interceptors.response.use(
   (error) => {
     // Handle authentication errors globally
     if (error.response?.status === 401 || error.response?.status === 403) {
-      // Skip auth error handling for login endpoints
+      // Skip auth error handling for login endpoints and CSRF endpoints
       const isLoginEndpoint =
-        error.config?.url?.includes("/login/admin") ||
-        error.config?.url?.includes("/csrf-cookie");
+        error.config?.url?.includes("/login") ||
+        error.config?.url?.includes("/csrf-cookie") ||
+        error.config?.url?.includes("/sanctum/csrf-cookie") ||
+        error.config?.url?.includes("/auth/google");
 
       if (!isLoginEndpoint) {
-        console.info(
-          "Auth error detected - user account may have been deleted"
-        );
+        console.info("Auth error detected - redirecting to login");
         handleAuthError();
         return Promise.reject(
           new Error("Authentication failed - redirecting to login")
@@ -177,7 +163,6 @@ axiosClient.interceptors.response.use(
       );
     }
 
-    // Let all other errors bubble up to component-level try/catch
     return Promise.reject(error);
   }
 );

@@ -41,16 +41,21 @@ async function handleLogin(event) {
   isCheckingAuth.value = true;
 
   try {
-    // Use the standard Sanctum CSRF cookie route
+    // Clear any existing judge session data
+    localStorage.removeItem("judgeSession");
+    localStorage.removeItem("token");
+    delete axiosClient.defaults.headers.common["Authorization"];
+
+    // Fetch CSRF token for session-based auth
     await axiosClient.get("/sanctum/csrf-cookie");
 
+    // Login request - this will set the session cookie automatically
     const response = await axiosClient.post("/api/v1/login", {
       username: data.value.username,
       password: data.value.password,
       remember: data.value.remember,
     });
 
-    // Rest of your login logic remains the same...
     const user = response?.data?.user;
 
     if (!user) {
@@ -58,14 +63,17 @@ async function handleLogin(event) {
       return;
     }
 
+    // Store remember preference
     if (data.value.remember) {
       localStorage.setItem("remembered", data.value.username);
     } else {
       localStorage.removeItem("remembered");
     }
 
+    // Set user in store
     userStore.setUser(user);
 
+    // Redirect based on role
     if (user.role) {
       try {
         if (user.role === "admin" || user.role === "tabulator") {

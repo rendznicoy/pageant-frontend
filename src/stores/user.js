@@ -20,15 +20,14 @@ export const useUserStore = defineStore("user", () => {
     // Don't clear localStorage here as axios interceptor handles it
   };
 
+  // user.js - Update fetchUser method
   const fetchUser = async (suppressErrors = false) => {
     if (user.value || isFetching.value) return !!user.value;
 
     isFetching.value = true;
     try {
-      // Skip CSRF for judge sessions
-      if (localStorage.getItem("judgeSession") !== "true") {
-        await axiosClient.get("/api/csrf-cookie");
-      }
+      // Don't fetch CSRF for judge sessions - they use token-based auth
+      // CSRF token will be fetched automatically by axios interceptor for session-based auth
 
       const res = await axiosClient.get("/api/v1/user");
 
@@ -56,7 +55,6 @@ export const useUserStore = defineStore("user", () => {
         err.message?.includes("Authentication failed") ||
         err.message?.includes("User account not found")
       ) {
-        // Already handled by interceptor
         return false;
       }
 
@@ -76,7 +74,6 @@ export const useUserStore = defineStore("user", () => {
         handleAuthError();
         return false;
       } else {
-        // Other errors - don't clear auth state for network issues
         if (!suppressErrors) {
           console.error("Error fetching user:", err);
         }
