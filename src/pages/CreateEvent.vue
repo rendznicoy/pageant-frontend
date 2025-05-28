@@ -442,9 +442,10 @@ const addManualStatistician = () => {
                 class="inline-flex items-center rounded-full bg-gray-200 px-2 py-1 text-sm text-gray-700 mr-1 mb-1"
               >
                 <img
-                  :src="option.profile_photo"
+                  :src="option.profile_photo || '/user24.png'"
                   class="w-5 h-5 rounded-full mr-1"
                   alt="avatar"
+                  @error="$event.target.src = '/user24.png'"
                 />
                 {{ option.email }}
                 <button
@@ -460,9 +461,10 @@ const addManualStatistician = () => {
             <template #option="{ option }">
               <div class="flex items-center gap-2">
                 <img
-                  :src="option.profile_photo"
+                  :src="option.profile_photo || '/user24.png'"
                   class="w-6 h-6 rounded-full"
                   alt="avatar"
+                  @error="$event.target.src = '/user24.png'"
                 />
                 <span class="text-sm">{{ option.email }}</span>
               </div>
