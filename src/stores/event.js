@@ -22,26 +22,36 @@ export const useEventStore = defineStore("event", () => {
 
       if (!forceRefresh && isCacheValid && local) {
         events.value = JSON.parse(local);
-        console.log("Loaded events from cache:", events.value); // Debug log
-        return events.value; // Return events for chaining
+        console.log("Loaded events from cache:", events.value);
+        return events.value;
       }
 
       const data = await axiosClient.get("/api/v1/events");
-      events.value = data.map((event) => ({
-        event_id: event.event_id,
-        event_name: event.event_name,
-        venue: event.venue || "Not set",
-        start_date: event.start_date,
-        end_date: event.end_date,
-        status: event.status,
-        division: event.division || "standard",
-        removed: event.removed || false,
-        cover_photo: event.cover_photo,
-      }));
-      console.log("Fetched events from API:", events.value); // Debug log
+
+      // DEBUG: Log the raw API response
+      console.log("Raw API response:", data);
+
+      events.value = data.map((event) => {
+        // DEBUG: Log each event's cover_photo
+        console.log(`Event ${event.event_id} cover_photo:`, event.cover_photo);
+
+        return {
+          event_id: event.event_id,
+          event_name: event.event_name,
+          venue: event.venue || "Not set",
+          start_date: event.start_date,
+          end_date: event.end_date,
+          status: event.status,
+          division: event.division || "standard",
+          removed: event.removed || false,
+          cover_photo: event.cover_photo,
+        };
+      });
+
+      console.log("Processed events:", events.value);
       localStorage.setItem("dashboard_events", JSON.stringify(events.value));
       localStorage.setItem("dashboard_events_timestamp", now.toString());
-      return events.value; // Return events for chaining
+      return events.value;
     } catch (err) {
       console.error("Failed to fetch events:", err);
       throw err;
