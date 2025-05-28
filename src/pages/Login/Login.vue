@@ -68,7 +68,12 @@ async function handleLogin(event) {
 
     if (user.role) {
       try {
-        redirectToDashboard(user.role);
+        // Both admin and tabulator go to admin dashboard
+        if (user.role === "admin" || user.role === "tabulator") {
+          router.push("/admin/dashboard");
+        } else {
+          redirectToDashboard(user.role); // For other roles like judge
+        }
       } catch (err) {
         loginError.value = "Invalid user role. Please contact support.";
       }
