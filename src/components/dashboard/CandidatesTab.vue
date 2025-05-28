@@ -92,6 +92,13 @@ const previewUrl = ref("");
 
 const getImageUrl = (photo) => {
   if (!photo) return "/vsu.png";
+
+  // If it's already a full URL (Cloudinary or other external), use it as-is
+  if (photo.startsWith("http://") || photo.startsWith("https://")) {
+    return `${photo}?t=${Date.now()}`;
+  }
+
+  // If it's a local storage path, construct the full URL
   const fullPath = photo.startsWith("/storage/")
     ? `${BACKEND_BASE_URL}${photo}`
     : `${BACKEND_BASE_URL}/storage/${photo}`;

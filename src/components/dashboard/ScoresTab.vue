@@ -427,7 +427,7 @@ onMounted(() => {
   initializeDarkMode();
   if (props.eventId) {
     fetchScores();
-    interval = setInterval(fetchScores, 120000);
+    interval = setInterval(fetchScores, 30000);
   }
 });
 

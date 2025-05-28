@@ -95,10 +95,18 @@ const tabs = computed(() => [
 
 const getImageUrl = computed(() => {
   if (!event.value?.cover_photo) return "/vsu.png";
-  const path = event.value.cover_photo;
-  const fullPath = path.startsWith("/storage/")
-    ? `${BACKEND_BASE_URL}${path}`
-    : `${BACKEND_BASE_URL}/storage/${path}`;
+
+  const coverPhoto = event.value.cover_photo;
+
+  // If it's already a full URL (Cloudinary), use it as-is
+  if (coverPhoto.startsWith("http://") || coverPhoto.startsWith("https://")) {
+    return `${coverPhoto}?t=${imageTimestamp.value}`;
+  }
+
+  // If it's a local storage path, construct the full URL
+  const fullPath = coverPhoto.startsWith("/storage/")
+    ? `${BACKEND_BASE_URL}${coverPhoto}`
+    : `${BACKEND_BASE_URL}/storage/${coverPhoto}`;
   return `${fullPath}?t=${imageTimestamp.value}`;
 });
 

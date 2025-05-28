@@ -698,7 +698,7 @@ const setupWebSocket = () => {
     });
 
     channel = pusher.subscribe(`event.${props.eventId}`);
-    const debouncedFetchStages = debounce(fetchStages, 60000);
+    const debouncedFetchStages = debounce(fetchStages, 30000);
 
     channel.bind("App\\Events\\StageStatusUpdated", (e) => {
       console.log(`Stage ${e.stage_id} status updated to ${e.status}`);
