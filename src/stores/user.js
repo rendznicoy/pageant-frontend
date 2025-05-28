@@ -26,21 +26,15 @@ export const useUserStore = defineStore("user", () => {
 
     isFetching.value = true;
     try {
-      // Don't fetch CSRF for judge sessions - they use token-based auth
-      // CSRF token will be fetched automatically by axios interceptor for session-based auth
-
       const res = await axiosClient.get("/api/v1/user");
 
-      // Handle different response formats
-      if (res?.data?.data) {
-        user.value = res.data.data;
-        userId.value = res.data.data.user_id || null;
-        judgeId.value = res.data.data.judge_id || null;
-        return true;
-      } else if (res?.data) {
-        user.value = res.data;
-        userId.value = res.data.user_id || null;
-        judgeId.value = res.data.judge_id || null;
+      console.log("fetchUser response:", res); // Debug log
+
+      // Since UserResource has $wrap = null, res should be the user object directly
+      if (res?.user_id) {
+        user.value = res;
+        userId.value = res.user_id || null;
+        judgeId.value = res.judge_id || null;
         return true;
       } else {
         if (!suppressErrors) {

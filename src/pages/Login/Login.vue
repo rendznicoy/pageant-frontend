@@ -49,16 +49,20 @@ async function handleLogin(event) {
     // Fetch CSRF token for session-based auth
     await axiosClient.get("/sanctum/csrf-cookie");
 
-    // Login request - this will set the session cookie automatically
+    // Login request
     const response = await axiosClient.post("/api/v1/login", {
       username: data.value.username,
       password: data.value.password,
       remember: data.value.remember,
     });
 
-    const user = response?.data?.user;
+    console.log("Login response:", response); // Debug log
+
+    // Since axios interceptor returns response.data, and your login returns { message, user }
+    const user = response?.user;
 
     if (!user) {
+      console.error("Login response structure:", response);
       loginError.value = "Unexpected response format. Please try again.";
       return;
     }
@@ -77,11 +81,12 @@ async function handleLogin(event) {
     if (user.role) {
       try {
         if (user.role === "admin" || user.role === "tabulator") {
-          router.push("/admin/dashboard");
+          await router.push("/admin/dashboard");
         } else {
           redirectToDashboard(user.role);
         }
       } catch (err) {
+        console.error("Redirect error:", err);
         loginError.value = "Invalid user role. Please contact support.";
       }
     } else {
@@ -134,7 +139,7 @@ onMounted(async () => {
 
   // Check if user is already logged in (silent check, no loading state)
   try {
-    const isLoggedIn = await userStore.fetchUser();
+    const isLoggedIn = await userStore.fetchUser(true); // suppressErrors = true
     if (isLoggedIn && userStore.user) {
       // Immediately redirect without showing the form
       if (userStore.user.role) {
@@ -144,12 +149,13 @@ onMounted(async () => {
             userStore.user.role === "admin" ||
             userStore.user.role === "tabulator"
           ) {
-            router.push("/admin/dashboard");
+            await router.push("/admin/dashboard");
           } else {
-            redirectToDashboard(userStore.user.role); // For other roles like judge
+            redirectToDashboard(userStore.user.role);
           }
-          return; // Exit early, don't continue with the rest
+          return; // Exit early
         } catch (err) {
+          console.error("Redirect error:", err);
           loginError.value = "Invalid user role. Please contact support.";
         }
       } else {
@@ -157,7 +163,7 @@ onMounted(async () => {
       }
     }
   } catch (error) {
-    console.info("User not authenticated");
+    console.info("User not authenticated", error);
   }
 
   // Check for URL error parameters
