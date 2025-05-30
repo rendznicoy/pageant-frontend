@@ -233,6 +233,7 @@ const handleDeleteCategory = async () => {
 };
 
 // Function to validate category weight
+// Function to validate category weight
 const validateCategoryWeight = (
   newWeight,
   stageId,
@@ -241,11 +242,32 @@ const validateCategoryWeight = (
   const stage = stages.value.find((s) => s.id === stageId);
   if (!stage) return { isValid: false, message: "Stage not found" };
 
+  // ✅ Fix: Ensure proper type comparison and exclusion
   const currentTotal = stage.categories
-    .filter((cat) => cat.id !== excludeCategoryId)
+    .filter((cat) => {
+      // Convert both IDs to strings for comparison to avoid type mismatch
+      const catId = String(cat.id || cat.category_id);
+      const excludeId = String(excludeCategoryId);
+      return catId !== excludeId;
+    })
     .reduce((sum, cat) => sum + (cat.weight || 0), 0);
 
   const newTotal = currentTotal + newWeight;
+
+  // ✅ Add debugging to help troubleshoot
+  console.log("Category weight validation:", {
+    newWeight,
+    stageId,
+    excludeCategoryId,
+    currentTotal,
+    newTotal,
+    categories: stage.categories.map((cat) => ({
+      id: cat.id,
+      category_id: cat.category_id,
+      weight: cat.weight,
+      excluded: String(cat.id || cat.category_id) === String(excludeCategoryId),
+    })),
+  });
 
   if (newTotal > 100) {
     return {
@@ -406,8 +428,16 @@ const updateCategory = async (formData) => {
   }
 
   const weight = parseInt(formData.get("category_weight"));
-  const categoryId = parseInt(formData.get("category_id"));
+  const categoryId =
+    parseInt(formData.get("category_id")) || selectedCategory.value.id;
   const stageId = parseInt(formData.get("stage_id"));
+
+  console.log("Update category validation inputs:", {
+    weight,
+    categoryId,
+    stageId,
+    selectedCategory: selectedCategory.value,
+  });
 
   const validation = validateCategoryWeight(weight, stageId, categoryId);
   if (!validation.isValid) {
@@ -422,6 +452,14 @@ const updateCategory = async (formData) => {
     formData.delete("max_score");
     formData.set("max_score", maxScore);
 
+    // ✅ Ensure we're using the correct category ID
+    formData.set("category_id", selectedCategory.value.category_id);
+
+    console.log(
+      "Sending update request with FormData:",
+      Object.fromEntries(formData.entries())
+    );
+
     await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/${selectedCategory.value.id}/edit`,
       formData
@@ -431,6 +469,7 @@ const updateCategory = async (formData) => {
     clearForms();
     await fetchStages();
   } catch (error) {
+    console.error("Category update error:", error);
     toast.error(error.response?.data?.message || "Failed to update category.");
   } finally {
     loading.value = false;
@@ -443,19 +482,23 @@ const openEditCategoryModal = (category) => {
     return;
   }
 
+  console.log("Opening edit modal for category:", category);
+
   selectedCategory.value = {
-    id: category.id,
-    category_id: category.id,
+    id: category.category_id || category.id, // ✅ Use category_id if available
+    category_id: category.category_id || category.id,
     event_id: category.event_id,
     stage_id: category.stage_id,
     category_name: category.name,
     category_weight: category.weight,
-    max_score: globalMaxScore.value, // ✅ Always use global max score
+    max_score: globalMaxScore.value,
   };
 
   categoryForm.value.category_name = category.name;
   categoryForm.value.category_weight = category.weight;
-  categoryForm.value.max_score = globalMaxScore.value; // ✅ Always use global max score
+  categoryForm.value.max_score = globalMaxScore.value;
+
+  console.log("Selected category for edit:", selectedCategory.value);
 
   showEditCategoryModal.value = true;
 };
