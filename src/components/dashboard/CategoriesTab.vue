@@ -259,10 +259,23 @@ const validateCategoryWeight = (
 
 const fetchEventDetails = async () => {
   try {
+    console.log("Fetching event details for:", props.eventId);
+
     const eventData = await axiosClient.get(`/api/v1/events/${props.eventId}`);
     const data = eventData.data || eventData;
+
+    console.log("Event data received:", data);
+
     eventStatus.value = data.status || "inactive";
-    globalMaxScore.value = data.global_max_score || 100; // ✅ Back to 100
+
+    // ✅ Use the actual database value, not a default
+    if (data.global_max_score !== undefined && data.global_max_score !== null) {
+      globalMaxScore.value = data.global_max_score;
+    } else {
+      globalMaxScore.value = 100; // Only use default if not set in database
+    }
+
+    console.log("Global max score set to:", globalMaxScore.value);
 
     // Set form values after fetching
     categoryForm.value.max_score = globalMaxScore.value;
@@ -318,19 +331,30 @@ const updateGlobalMaxScore = async (newMaxScore) => {
 
   loading.value = true;
   try {
-    await axiosClient.patch(
+    console.log("Sending updateGlobalMaxScore request:", {
+      event_id: props.eventId,
+      global_max_score: newMaxScore,
+    });
+
+    const response = await axiosClient.patch(
       `/api/v1/events/${props.eventId}/global-max-score`,
       {
         global_max_score: newMaxScore,
       }
     );
 
+    console.log("updateGlobalMaxScore response:", response);
+
     globalMaxScore.value = newMaxScore;
     toast.success("Global max score updated successfully!");
     showEditMaxScoreModal.value = false;
     clearForms();
+
+    // Refresh event details to verify
+    await fetchEventDetails();
     await fetchStages();
   } catch (error) {
+    console.error("updateGlobalMaxScore error:", error);
     toast.error(
       error.response?.data?.message || "Failed to update global max score."
     );
