@@ -262,7 +262,7 @@ const fetchEventDetails = async () => {
     const eventData = await axiosClient.get(`/api/v1/events/${props.eventId}`);
     const data = eventData.data || eventData;
     eventStatus.value = data.status || "inactive";
-    globalMaxScore.value = data.global_max_score || 100; // ✅ Change fallback to 10
+    globalMaxScore.value = data.global_max_score || 100; // ✅ Back to 100
 
     // Set form values after fetching
     categoryForm.value.max_score = globalMaxScore.value;
@@ -1462,7 +1462,7 @@ onMounted(async () => {
               :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
               class="text-xs mt-1"
             >
-              Max score is set globally and applies to all categories.
+              Max score is set globally for all categories in this event.
             </p>
           </div>
 
@@ -1610,13 +1610,13 @@ onMounted(async () => {
               "
               class="w-full border rounded-lg px-3 py-2 text-sm"
             >
-              {{ categoryForm.max_score }}
+              {{ globalMaxScore }}
             </div>
             <p
               :class="isDarkMode ? 'text-gray-400' : 'text-gray-500'"
               class="text-xs mt-1"
             >
-              Max score is set globally and applies to all categories.
+              Max score is set globally for all categories in this event.
             </p>
           </div>
 
