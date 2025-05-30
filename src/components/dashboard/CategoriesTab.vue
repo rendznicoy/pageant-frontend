@@ -32,11 +32,11 @@ const stageForm = ref({
 const categoryForm = ref({
   category_name: "",
   category_weight: "",
-  max_score: 100,
+  max_score: null,
 });
 
 const maxScoreForm = ref({
-  global_max_score: 100,
+  global_max_score: null,
 });
 
 const clearForms = () => {
