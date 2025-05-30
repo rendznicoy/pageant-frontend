@@ -299,15 +299,18 @@ const fetchStages = async () => {
       ? stagesData.data
       : [];
 
+    console.log("Fetched stages with categories:", stages.value);
+
     stages.value.forEach((stage) => {
       stage.totalWeight =
         stage.categories?.reduce((sum, cat) => sum + (cat.weight || 0), 0) || 0;
 
       if (stage.categories) {
         stage.categories.forEach((category) => {
-          if (!category.max_score) {
-            category.max_score = globalMaxScore.value;
-          }
+          console.log(
+            `Category "${category.name}" max_score:`,
+            category.max_score
+          );
         });
       }
     });
@@ -331,10 +334,7 @@ const updateGlobalMaxScore = async (newMaxScore) => {
 
   loading.value = true;
   try {
-    console.log("Sending updateGlobalMaxScore request:", {
-      event_id: props.eventId,
-      global_max_score: newMaxScore,
-    });
+    console.log("Updating global max score to:", newMaxScore);
 
     const response = await axiosClient.patch(
       `/api/v1/events/${props.eventId}/global-max-score`,
@@ -343,16 +343,19 @@ const updateGlobalMaxScore = async (newMaxScore) => {
       }
     );
 
-    console.log("updateGlobalMaxScore response:", response);
+    console.log("Global max score update response:", response);
 
+    // Update local state
     globalMaxScore.value = newMaxScore;
+
+    // ✅ Force refresh all data to show updated categories
+    await Promise.all([fetchEventDetails(), fetchStages()]);
+
     toast.success("Global max score updated successfully!");
     showEditMaxScoreModal.value = false;
     clearForms();
 
-    // Refresh event details to verify
-    await fetchEventDetails();
-    await fetchStages();
+    console.log("Categories should now show max score:", newMaxScore);
   } catch (error) {
     console.error("updateGlobalMaxScore error:", error);
     toast.error(
