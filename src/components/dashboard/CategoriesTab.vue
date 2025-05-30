@@ -210,7 +210,10 @@ const isEventLocked = computed(() => {
 // Enhanced method to handle max score input changes
 const handleMaxScoreChange = (event) => {
   const value = parseInt(event.target.value) || globalMaxScore.value;
-  categoryForm.value.max_score = Math.max(1, Math.min(100, value));
+  categoryForm.value.max_score = Math.max(
+    1,
+    Math.min(globalMaxScore.value, value)
+  ); // ✅ uses global max
 };
 
 const handleDeleteStage = async () => {
@@ -260,6 +263,10 @@ const fetchEventDetails = async () => {
     const data = eventData.data || eventData;
     eventStatus.value = data.status || "inactive";
     globalMaxScore.value = data.global_max_score || 100;
+
+    // ✅ Set form values after fetching
+    categoryForm.value.max_score = globalMaxScore.value;
+    maxScoreForm.value.global_max_score = globalMaxScore.value;
   } catch (error) {
     console.error("Error fetching event details:", error);
     toast.error("Failed to fetch event details");
@@ -349,9 +356,7 @@ const createCategory = async (formData) => {
 
   loading.value = true;
   try {
-    formData.delete("max_score");
     formData.set("max_score", globalMaxScore.value);
-
     await axiosClient.post(
       `/api/v1/events/${props.eventId}/categories/create`,
       formData
@@ -418,12 +423,12 @@ const openEditCategoryModal = (category) => {
     stage_id: category.stage_id,
     category_name: category.name,
     category_weight: category.weight,
-    max_score: category.max_score || globalMaxScore.value,
+    max_score: globalMaxScore.value, // ✅ Always use global max score
   };
 
   categoryForm.value.category_name = category.name;
   categoryForm.value.category_weight = category.weight;
-  categoryForm.value.max_score = category.max_score || globalMaxScore.value;
+  categoryForm.value.max_score = globalMaxScore.value; // ✅ Always use global max score
 
   showEditCategoryModal.value = true;
 };
@@ -981,7 +986,7 @@ onMounted(async () => {
                     "
                     class="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold"
                   >
-                    {{ category.max_score }}
+                    {{ globalMaxScore }}
                   </span>
                 </td>
                 <td class="px-6 py-4 whitespace-nowrap">
