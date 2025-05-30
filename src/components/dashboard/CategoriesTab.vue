@@ -262,9 +262,9 @@ const fetchEventDetails = async () => {
     const eventData = await axiosClient.get(`/api/v1/events/${props.eventId}`);
     const data = eventData.data || eventData;
     eventStatus.value = data.status || "inactive";
-    globalMaxScore.value = data.global_max_score || 100;
+    globalMaxScore.value = data.global_max_score || 100; // ✅ Change fallback to 10
 
-    // ✅ Set form values after fetching
+    // Set form values after fetching
     categoryForm.value.max_score = globalMaxScore.value;
     maxScoreForm.value.global_max_score = globalMaxScore.value;
   } catch (error) {
