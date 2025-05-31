@@ -135,14 +135,20 @@ const prevPage = () => {
 //  Auto-refresh functionality
 const startAutoRefresh = () => {
   if (interval) clearInterval(interval);
-  interval = setInterval(() => {
+  interval = setInterval(async () => {
     if (eventId) {
       console.log("Auto-refreshing results...");
-      fetchFinalResults();
-      fetchAllPartialResults();
-      fetchCategoryResults();
+      // Remove loading indicators for auto-refresh
+      try {
+        await fetchFinalResults();
+        await fetchAllPartialResults();
+        await fetchCategoryResults();
+      } catch (error) {
+        console.error("Auto-refresh error:", error);
+        // Don't show toast errors for auto-refresh
+      }
     }
-  }, 30000); // Changed from 600000 (10 minutes) to 30000 (30 seconds)
+  }, 30000);
 };
 
 const stopAutoRefresh = () => {
@@ -344,21 +350,35 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
 };
 
 // Score color logic
-const getScoreColorClass = (score, maxScore = null) => {
-  const actualMaxScore = maxScore || eventMaxScore.value;
-  const percentage = (score / actualMaxScore) * 100;
-
-  if (percentage < 60)
+const getScoreColorClass = (score, isWeightedScore = true) => {
+  if (isWeightedScore) {
+    // For weighted scores, use different thresholds
+    if (score < 60)
+      return isDarkMode.value
+        ? "bg-red-800 text-red-200"
+        : "bg-red-100 text-red-800";
+    if (score >= 60 && score < 80)
+      return isDarkMode.value
+        ? "bg-yellow-800 text-yellow-200"
+        : "bg-yellow-100 text-yellow-800";
     return isDarkMode.value
-      ? "bg-red-800 text-red-200"
-      : "bg-red-100 text-red-800";
-  if (percentage >= 60 && percentage < 80)
+      ? "bg-green-800 text-green-200"
+      : "bg-green-100 text-green-800";
+  } else {
+    // For category scores, use percentage-based thresholds
+    const percentage = (score / eventMaxScore.value) * 100;
+    if (percentage < 60)
+      return isDarkMode.value
+        ? "bg-red-800 text-red-200"
+        : "bg-red-100 text-red-800";
+    if (percentage >= 60 && percentage < 80)
+      return isDarkMode.value
+        ? "bg-yellow-800 text-yellow-200"
+        : "bg-yellow-100 text-yellow-800";
     return isDarkMode.value
-      ? "bg-yellow-800 text-yellow-200"
-      : "bg-yellow-100 text-yellow-800";
-  return isDarkMode.value
-    ? "bg-green-800 text-green-200"
-    : "bg-green-100 text-green-800";
+      ? "bg-green-800 text-green-200"
+      : "bg-green-100 text-green-800";
+  }
 };
 
 // Fetch category results with better error handling
@@ -942,13 +962,9 @@ onUnmounted(() => {
                   <td class="px-3 py-4 whitespace-nowrap">
                     <span
                       class="px-2 py-1 rounded-full text-xs font-medium"
-                      :class="
-                        getScoreColorClass(result.mean_rating, eventMaxScore)
-                      "
+                      :class="getScoreColorClass(result.mean_rating, true)"
                     >
-                      {{ Number(result.mean_rating || 0).toFixed(2) }}/{{
-                        eventMaxScore
-                      }}
+                      {{ Number(result.mean_rating || 0).toFixed(2) }}
                     </span>
                   </td>
                   <td class="px-3 py-4 whitespace-nowrap">
@@ -1082,13 +1098,9 @@ onUnmounted(() => {
                   <td class="px-3 py-4 whitespace-nowrap">
                     <span
                       class="px-2 py-1 rounded-full text-xs font-medium"
-                      :class="
-                        getScoreColorClass(result.mean_rating, eventMaxScore)
-                      "
+                      :class="getScoreColorClass(result.mean_rating, true)"
                     >
-                      {{ Number(result.mean_rating || 0).toFixed(2) }}/{{
-                        eventMaxScore
-                      }}
+                      {{ Number(result.mean_rating || 0).toFixed(2) }}
                     </span>
                   </td>
                   <td class="px-3 py-4 whitespace-nowrap">
