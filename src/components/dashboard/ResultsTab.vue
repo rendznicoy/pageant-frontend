@@ -138,14 +138,27 @@ const startAutoRefresh = () => {
   interval = setInterval(async () => {
     if (eventId) {
       console.log("Auto-refreshing results...");
-      // Remove loading indicators for auto-refresh
       try {
-        await fetchFinalResults();
-        await fetchAllPartialResults();
-        await fetchCategoryResults();
+        // Fetch each type of results separately with individual error handling
+        try {
+          await fetchFinalResults();
+        } catch (error) {
+          console.error("Auto-refresh final results error:", error);
+        }
+
+        try {
+          await fetchAllPartialResults();
+        } catch (error) {
+          console.error("Auto-refresh partial results error:", error);
+        }
+
+        try {
+          await fetchCategoryResults();
+        } catch (error) {
+          console.error("Auto-refresh category results error:", error);
+        }
       } catch (error) {
-        console.error("Auto-refresh error:", error);
-        // Don't show toast errors for auto-refresh
+        console.error("Auto-refresh general error:", error);
       }
     }
   }, 30000);
@@ -350,31 +363,38 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
 };
 
 // Score color logic
-const getScoreColorClass = (score, isWeightedScore = true) => {
+const getScoreColorClass = (score, isWeightedScore = true, maxScore = null) => {
   if (isWeightedScore) {
-    // For weighted scores, use different thresholds
-    if (score < 60)
+    // For weighted scores, use different thresholds based on typical weighted score ranges
+    // Adjust these thresholds based on your typical score ranges
+    if (score < 60) {
       return isDarkMode.value
         ? "bg-red-800 text-red-200"
         : "bg-red-100 text-red-800";
-    if (score >= 60 && score < 80)
+    }
+    if (score >= 60 && score < 80) {
       return isDarkMode.value
         ? "bg-yellow-800 text-yellow-200"
         : "bg-yellow-100 text-yellow-800";
+    }
     return isDarkMode.value
       ? "bg-green-800 text-green-200"
       : "bg-green-100 text-green-800";
   } else {
-    // For category scores, use percentage-based thresholds
-    const percentage = (score / eventMaxScore.value) * 100;
-    if (percentage < 60)
+    // For category scores, use percentage-based thresholds with the specific max score
+    const actualMaxScore = maxScore || eventMaxScore.value;
+    const percentage = (score / actualMaxScore) * 100;
+
+    if (percentage < 60) {
       return isDarkMode.value
         ? "bg-red-800 text-red-200"
         : "bg-red-100 text-red-800";
-    if (percentage >= 60 && percentage < 80)
+    }
+    if (percentage >= 60 && percentage < 80) {
       return isDarkMode.value
         ? "bg-yellow-800 text-yellow-200"
         : "bg-yellow-100 text-yellow-800";
+    }
     return isDarkMode.value
       ? "bg-green-800 text-green-200"
       : "bg-green-100 text-green-800";
@@ -1235,6 +1255,7 @@ onUnmounted(() => {
                           :class="
                             getScoreColorClass(
                               result.category_average,
+                              false,
                               category.max_score
                             )
                           "
@@ -1341,6 +1362,7 @@ onUnmounted(() => {
                           :class="
                             getScoreColorClass(
                               result.category_average,
+                              false,
                               category.max_score
                             )
                           "
@@ -1436,7 +1458,8 @@ onUnmounted(() => {
                         class="px-2 py-1 rounded-full text-xs font-medium"
                         :class="
                           getScoreColorClass(
-                            result.mean_rating || result.raw_average
+                            result.mean_rating || result.raw_average,
+                            true
                           )
                         "
                       >
@@ -1529,7 +1552,8 @@ onUnmounted(() => {
                         class="px-2 py-1 rounded-full text-xs font-medium"
                         :class="
                           getScoreColorClass(
-                            result.mean_rating || result.raw_average
+                            result.mean_rating || result.raw_average,
+                            true
                           )
                         "
                       >
