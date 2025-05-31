@@ -141,7 +141,7 @@ const startAutoRefresh = () => {
       try {
         // Fetch each type of results separately with individual error handling
         try {
-          await fetchFinalResults();
+          await fetchFinalResults(true); // Pass true for auto-refresh
         } catch (error) {
           console.error("Auto-refresh final results error:", error);
         }
@@ -288,7 +288,7 @@ const refreshResults = async () => {
   const errors = [];
 
   try {
-    await fetchFinalResults();
+    await fetchFinalResults(false); // Pass false for manual refresh
   } catch (error) {
     hasErrors = true;
     errors.push("final results");
@@ -474,12 +474,17 @@ const fetchAllPartialResults = async () => {
 };
 
 // e5e7eb final results
-const fetchFinalResults = async () => {
+// Final results
+const fetchFinalResults = async (isAutoRefresh = false) => {
   if (!eventId) {
     throw new Error("Missing event ID");
   }
 
-  loading.value = true;
+  // Only show loading animation if it's not an auto-refresh
+  if (!isAutoRefresh) {
+    loading.value = true;
+  }
+
   try {
     const eventResponse = await axiosClient.get(`/api/v1/events/${eventId}`);
 
@@ -503,7 +508,10 @@ const fetchFinalResults = async () => {
     console.error("Error fetching final results:", error);
     throw error;
   } finally {
-    loading.value = false;
+    // Only hide loading animation if it's not an auto-refresh
+    if (!isAutoRefresh) {
+      loading.value = false;
+    }
   }
 };
 
@@ -634,7 +642,7 @@ onMounted(async () => {
   if (eventId) {
     loading.value = true;
     try {
-      await Promise.all([fetchFinalResults(), fetchAllPartialResults()]);
+      await Promise.all([fetchFinalResults(false), fetchAllPartialResults()]); // Pass false for initial load
       await fetchCategoryResults();
     } catch (error) {
       console.error("Error during initial load:", error);
