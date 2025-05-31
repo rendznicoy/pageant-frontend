@@ -1444,7 +1444,7 @@ onUnmounted(() => {
                           Number(
                             result.mean_rating || result.raw_average || 0
                           ).toFixed(2)
-                        }}/{{ eventMaxScore }}
+                        }}
                       </span>
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap">
@@ -1537,7 +1537,7 @@ onUnmounted(() => {
                           Number(
                             result.mean_rating || result.raw_average || 0
                           ).toFixed(2)
-                        }}/{{ eventMaxScore }}
+                        }}
                       </span>
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap">
