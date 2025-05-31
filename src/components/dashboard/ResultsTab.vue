@@ -4,8 +4,6 @@ import { useToast } from "vue-toastification";
 import axiosClient from "@/axios";
 import { useEventStore } from "@/stores/event";
 
-let interval = null;
-
 const { eventId, stageId } = defineProps(["eventId", "stageId"]);
 
 const toast = useToast();
@@ -132,45 +130,6 @@ const prevPage = () => {
   }
 };
 
-//  Auto-refresh functionality
-const startAutoRefresh = () => {
-  if (interval) clearInterval(interval);
-  interval = setInterval(async () => {
-    if (eventId) {
-      console.log("Auto-refreshing results...");
-      try {
-        // Fetch each type of results separately with individual error handling
-        try {
-          await fetchFinalResults(true); // Pass true for auto-refresh
-        } catch (error) {
-          console.error("Auto-refresh final results error:", error);
-        }
-
-        try {
-          await fetchAllPartialResults();
-        } catch (error) {
-          console.error("Auto-refresh partial results error:", error);
-        }
-
-        try {
-          await fetchCategoryResults();
-        } catch (error) {
-          console.error("Auto-refresh category results error:", error);
-        }
-      } catch (error) {
-        console.error("Auto-refresh general error:", error);
-      }
-    }
-  }, 30000);
-};
-
-const stopAutoRefresh = () => {
-  if (interval) {
-    clearInterval(interval);
-    interval = null;
-  }
-};
-
 // Dark mode initialization
 const initializeDarkMode = () => {
   const savedDarkMode = localStorage.getItem("darkMode");
@@ -191,7 +150,7 @@ const initializeDarkMode = () => {
   }
 };
 
-//  CSV Export
+// CSV Export
 const exportResultsCSV = async () => {
   if (!finalResults.value.length && !finalJudges.value.length) {
     toast.info("No results to export.");
@@ -207,7 +166,7 @@ const exportResultsCSV = async () => {
       "Team",
       "Sex",
       "Mean Rating",
-      "Mean Rank", // Add Mean Rank column
+      "Mean Rank",
       "Overall Rank",
     ];
     csvData.push(headers);
@@ -226,8 +185,8 @@ const exportResultsCSV = async () => {
           `${result.candidate.first_name} ${result.candidate.last_name}`,
           result.candidate.team || "N/A",
           "Male",
-          parseFloat(result.mean_rating || result.raw_average || 0).toFixed(2), // Ensure 2 decimal places
-          parseFloat(result.mean_rank || 0).toFixed(2), // Add mean rank with 2 decimal places
+          parseFloat(result.mean_rating || result.raw_average || 0).toFixed(2),
+          parseFloat(result.mean_rank || 0).toFixed(2),
           result.rank || result.overall_rank || "N/A",
         ];
         csvData.push(row);
@@ -243,8 +202,8 @@ const exportResultsCSV = async () => {
           `${result.candidate.first_name} ${result.candidate.last_name}`,
           result.candidate.team || "N/A",
           "Female",
-          parseFloat(result.mean_rating || result.raw_average || 0).toFixed(2), // Ensure 2 decimal places
-          parseFloat(result.mean_rank || 0).toFixed(2), // Add mean rank with 2 decimal places
+          parseFloat(result.mean_rating || result.raw_average || 0).toFixed(2),
+          parseFloat(result.mean_rank || 0).toFixed(2),
           result.rank || result.overall_rank || "N/A",
         ];
         csvData.push(row);
@@ -284,11 +243,12 @@ const exportResultsCSV = async () => {
 
 // Manual refresh function
 const refreshResults = async () => {
+  loading.value = true;
   let hasErrors = false;
   const errors = [];
 
   try {
-    await fetchFinalResults(false); // Pass false for manual refresh
+    await fetchFinalResults();
   } catch (error) {
     hasErrors = true;
     errors.push("final results");
@@ -318,6 +278,8 @@ const refreshResults = async () => {
   } else {
     toast.success("Results refreshed!");
   }
+
+  loading.value = false;
 };
 
 // Ranking function
@@ -328,7 +290,6 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
     return { males, females };
   }
 
-  // 🔥 Fix: include all candidates regardless of is_active
   const visibleCandidates = candidates;
 
   const males = visibleCandidates.filter((c) => c.sex?.toLowerCase() === "m");
@@ -365,8 +326,6 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
 // Score color logic
 const getScoreColorClass = (score, isWeightedScore = true, maxScore = null) => {
   if (isWeightedScore) {
-    // For weighted scores, use different thresholds based on typical weighted score ranges
-    // Adjust these thresholds based on your typical score ranges
     if (score < 60) {
       return isDarkMode.value
         ? "bg-red-800 text-red-200"
@@ -381,7 +340,6 @@ const getScoreColorClass = (score, isWeightedScore = true, maxScore = null) => {
       ? "bg-green-800 text-green-200"
       : "bg-green-100 text-green-800";
   } else {
-    // For category scores, use percentage-based thresholds with the specific max score
     const actualMaxScore = maxScore || eventMaxScore.value;
     const percentage = (score / actualMaxScore) * 100;
 
@@ -406,7 +364,6 @@ const fetchCategoryResults = async () => {
   if (!eventId) return;
 
   try {
-    // Wait for stages to be loaded first
     if (!stages.value.length) {
       await fetchAllPartialResults();
     }
@@ -417,8 +374,6 @@ const fetchCategoryResults = async () => {
         const categoryRes = await axiosClient.get(
           `/api/v1/events/${eventId}/stages/${stageId}/category-results`
         );
-
-        // Fix: Handle response consistently
         categoryResults.value[stageId] = categoryRes.data || categoryRes;
       } catch (stageError) {
         console.error(
@@ -452,7 +407,6 @@ const fetchAllPartialResults = async () => {
     for (const stage of stages.value) {
       const stageId = stage.id || stage.stage_id;
 
-      // Use the permanent results endpoint for Results Tab
       const partial = await axiosClient.get(
         `/api/v1/events/${eventId}/stages/${stageId}/partial-results-permanent`
       );
@@ -473,23 +427,17 @@ const fetchAllPartialResults = async () => {
   }
 };
 
-// e5e7eb final results
-// Final results
-const fetchFinalResults = async (isAutoRefresh = false) => {
+// Final results - simplified
+const fetchFinalResults = async () => {
   if (!eventId) {
     throw new Error("Missing event ID");
   }
 
-  // Only show loading animation if it's not an auto-refresh
-  if (!isAutoRefresh) {
-    loading.value = true;
-  }
-
   try {
-    const eventResponse = await axiosClient.get(`/api/v1/events/${eventId}`);
+    console.log("Fetching final results for event:", eventId);
 
-    // Fix: Handle axios interceptor unwrapping consistently
-    const eventData = eventResponse; // axios interceptor already unwrapped it
+    const eventResponse = await axiosClient.get(`/api/v1/events/${eventId}`);
+    const eventData = eventResponse;
     eventMaxScore.value =
       eventData.max_score || eventData.global_max_score || 100;
 
@@ -497,9 +445,13 @@ const fetchFinalResults = async (isAutoRefresh = false) => {
       `/api/v1/events/${eventId}/scores/final-results`
     );
 
-    // Handle final results response
+    console.log("Final results response:", data);
+
     finalResults.value = Array.isArray(data?.candidates) ? data.candidates : [];
     finalJudges.value = Array.isArray(data?.judges) ? data.judges : [];
+
+    console.log("Final results count:", finalResults.value.length);
+    console.log("Final judges count:", finalJudges.value.length);
 
     if (!finalResults.value.length) {
       console.info("No final results available yet.");
@@ -507,17 +459,10 @@ const fetchFinalResults = async (isAutoRefresh = false) => {
   } catch (error) {
     console.error("Error fetching final results:", error);
     throw error;
-  } finally {
-    // Only hide loading animation if it's not an auto-refresh
-    if (!isAutoRefresh) {
-      loading.value = false;
-    }
   }
 };
 
-// PDF functions
-// Replace both downloadReport and previewReport functions in ResultsTab.vue:
-
+// PDF functions remain the same...
 const downloadReport = async () => {
   if (!finalResults.value.length) {
     toast.info("No results to download.");
@@ -530,27 +475,19 @@ const downloadReport = async () => {
       responseType: "blob",
     });
 
-    console.log("Download response:", response); // Debug log
-
-    // Handle the blob response - axios interceptor returns full response for blobs
     let blob;
     if (response.data && response.data instanceof Blob) {
       blob = response.data;
     } else if (response instanceof Blob) {
       blob = response;
     } else {
-      console.error("Unexpected response format:", response);
       throw new Error("Invalid response format for PDF download");
     }
-
-    // Verify blob has content and correct type
-    console.log("Blob size:", blob.size, "Blob type:", blob.type); // Debug log
 
     if (blob.size === 0) {
       throw new Error("Received empty PDF file");
     }
 
-    // Force PDF mime type if not set
     if (!blob.type || blob.type === "application/octet-stream") {
       blob = new Blob([blob], { type: "application/pdf" });
     }
@@ -591,27 +528,19 @@ const previewReport = async () => {
       }
     );
 
-    console.log("Preview response:", response); // Debug log
-
-    // Handle the blob response - axios interceptor returns full response for blobs
     let blob;
     if (response.data && response.data instanceof Blob) {
       blob = response.data;
     } else if (response instanceof Blob) {
       blob = response;
     } else {
-      console.error("Unexpected response format:", response);
       throw new Error("Invalid response format for PDF preview");
     }
-
-    // Verify blob has content and correct type
-    console.log("Blob size:", blob.size, "Blob type:", blob.type); // Debug log
 
     if (blob.size === 0) {
       throw new Error("Received empty PDF file");
     }
 
-    // Force PDF mime type if not set
     if (!blob.type || blob.type === "application/octet-stream") {
       blob = new Blob([blob], { type: "application/pdf" });
     }
@@ -642,20 +571,17 @@ onMounted(async () => {
   if (eventId) {
     loading.value = true;
     try {
-      await Promise.all([fetchFinalResults(false), fetchAllPartialResults()]); // Pass false for initial load
+      await Promise.all([fetchFinalResults(), fetchAllPartialResults()]);
       await fetchCategoryResults();
     } catch (error) {
       console.error("Error during initial load:", error);
     } finally {
       loading.value = false;
     }
-    startAutoRefresh();
   }
 });
 
-onUnmounted(() => {
-  stopAutoRefresh();
-});
+// Remove onUnmounted since we no longer have auto-refresh
 </script>
 
 <template>
@@ -756,16 +682,6 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
-
-      <!-- Auto-refresh indicator -->
-      <div
-        class="flex items-center text-sm mb-4 transition-colors"
-        :class="isDarkMode ? 'text-gray-400' : 'text-green-600'"
-      >
-        <i class="fas fa-sync-alt fa-spin mr-2 opacity-50"></i>
-        Auto-refreshing every 30 seconds
-      </div>
-
       <!-- Page Navigation -->
       <div
         v-if="totalPages > 1"
