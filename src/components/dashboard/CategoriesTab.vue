@@ -225,10 +225,10 @@ const handleDeleteStage = async () => {
 };
 
 const handleDeleteCategory = async () => {
-  if (categoryToDelete.value && categoryToDelete.value.id) {
-    await deleteCategory(categoryToDelete.value); // Pass full object instead of just ID
-    showDeleteCategoryModal.value = false;
-    categoryToDelete.value = null;
+  if (categoryToDelete.value) {
+    await deleteCategory(categoryToDelete.value);
+    showDeleteCategoryModal.value = false; // ✅ Close modal
+    categoryToDelete.value = null; // ✅ Clear selection
   }
 };
 
@@ -519,7 +519,16 @@ const confirmDeleteCategory = (category) => {
     );
     return;
   }
-  categoryToDelete.value = category;
+
+  // ✅ Normalize the category object like we do in openEditCategoryModal
+  categoryToDelete.value = {
+    id: category.category_id || category.id,
+    category_id: category.category_id || category.id,
+    stage_id: category.stage_id,
+    name: category.name || category.category_name,
+    // Add other properties if needed
+  };
+
   showDeleteCategoryModal.value = true;
 };
 
