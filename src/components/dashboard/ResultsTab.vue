@@ -324,14 +324,19 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
 };
 
 // Score color logic
+// Update the getScoreColorClass function in ResultsTab.vue
 const getScoreColorClass = (score, isWeightedScore = true, maxScore = null) => {
   if (isWeightedScore) {
-    if (score < 60) {
+    // For weighted scores, use percentage of total possible weight (usually 100)
+    // Weighted scores should typically be 0-100 range after applying category weights
+    const percentage = Math.min(100, Math.max(0, score)); // Clamp between 0-100
+
+    if (percentage < 60) {
       return isDarkMode.value
         ? "bg-red-800 text-red-200"
         : "bg-red-100 text-red-800";
     }
-    if (score >= 60 && score < 80) {
+    if (percentage >= 60 && percentage < 80) {
       return isDarkMode.value
         ? "bg-yellow-800 text-yellow-200"
         : "bg-yellow-100 text-yellow-800";
