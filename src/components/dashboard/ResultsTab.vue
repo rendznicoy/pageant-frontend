@@ -344,9 +344,12 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
 };
 
 // Score color logic
+// Fix the score color logic to handle both cases
 const getScoreColorClass = (score, maxScore = null) => {
-  // Always calculate percentage based on 100-point scale since scores are normalized to 100
-  const percentage = (score / 100) * 100;
+  // For category results, use the actual max score
+  // For other results (already normalized to 100), use 100
+  const actualMaxScore = maxScore && maxScore !== 100 ? maxScore : 100;
+  const percentage = (score / actualMaxScore) * 100;
 
   if (percentage < 60)
     return isDarkMode.value
@@ -1215,7 +1218,7 @@ onUnmounted(() => {
                           :class="
                             getScoreColorClass(
                               result.category_average,
-                              category.max_score
+                              category.max_score // ✅ Pass the actual category max score
                             )
                           "
                         >
@@ -1321,7 +1324,7 @@ onUnmounted(() => {
                           :class="
                             getScoreColorClass(
                               result.category_average,
-                              category.max_score
+                              category.max_score // ✅ Pass the actual category max score
                             )
                           "
                         >
