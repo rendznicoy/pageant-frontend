@@ -1,10 +1,8 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { useToast } from "vue-toastification";
 import axiosClient from "@/axios";
 import { useEventStore } from "@/stores/event";
-
-let interval = null;
 
 const { eventId, stageId } = defineProps(["eventId", "stageId"]);
 
@@ -129,26 +127,6 @@ const nextPage = () => {
 const prevPage = () => {
   if (currentPage.value > 1) {
     goToPage(currentPage.value - 1);
-  }
-};
-
-//  Auto-refresh functionality
-const startAutoRefresh = () => {
-  if (interval) clearInterval(interval);
-  interval = setInterval(() => {
-    if (eventId) {
-      console.log("Auto-refreshing results...");
-      fetchFinalResults();
-      fetchAllPartialResults();
-      fetchCategoryResults();
-    }
-  }, 30000); // Changed from 600000 (10 minutes) to 30000 (30 seconds)
-};
-
-const stopAutoRefresh = () => {
-  if (interval) {
-    clearInterval(interval);
-    interval = null;
   }
 };
 
@@ -436,7 +414,7 @@ const fetchAllPartialResults = async () => {
   }
 };
 
-// e5e7eb final results
+// Final results
 const fetchFinalResults = async () => {
   if (!eventId) {
     throw new Error("Missing event ID");
@@ -471,8 +449,6 @@ const fetchFinalResults = async () => {
 };
 
 // PDF functions
-// Replace both downloadReport and previewReport functions in ResultsTab.vue:
-
 const downloadReport = async () => {
   if (!finalResults.value.length) {
     toast.info("No results to download.");
@@ -604,12 +580,7 @@ onMounted(async () => {
     } finally {
       loading.value = false;
     }
-    startAutoRefresh();
   }
-});
-
-onUnmounted(() => {
-  stopAutoRefresh();
 });
 </script>
 
@@ -711,16 +682,6 @@ onUnmounted(() => {
           </button>
         </div>
       </div>
-
-      <!-- Auto-refresh indicator -->
-      <div
-        class="flex items-center text-sm mb-4 transition-colors"
-        :class="isDarkMode ? 'text-gray-400' : 'text-green-600'"
-      >
-        <i class="fas fa-sync-alt fa-spin mr-2 opacity-50"></i>
-        Auto-refreshing every 30 seconds
-      </div>
-
       <!-- Page Navigation -->
       <div
         v-if="totalPages > 1"
