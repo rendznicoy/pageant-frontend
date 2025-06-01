@@ -345,8 +345,8 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
 
 // Score color logic
 const getScoreColorClass = (score, maxScore = null) => {
-  const actualMaxScore = maxScore || eventMaxScore.value;
-  const percentage = (score / actualMaxScore) * 100;
+  // Always calculate percentage based on 100-point scale since we normalize scores
+  const percentage = (score / 100) * 100; // score is already normalized to 100-point scale
 
   if (percentage < 60)
     return isDarkMode.value
@@ -942,13 +942,9 @@ onUnmounted(() => {
                   <td class="px-3 py-4 whitespace-nowrap">
                     <span
                       class="px-2 py-1 rounded-full text-xs font-medium"
-                      :class="
-                        getScoreColorClass(result.mean_rating, eventMaxScore)
-                      "
+                      :class="getScoreColorClass(result.mean_rating)"
                     >
-                      {{ Number(result.mean_rating || 0).toFixed(2) }}/{{
-                        eventMaxScore
-                      }}
+                      {{ Number(result.mean_rating || 0).toFixed(2) }}/100
                     </span>
                   </td>
                   <td class="px-3 py-4 whitespace-nowrap">
@@ -1082,13 +1078,9 @@ onUnmounted(() => {
                   <td class="px-3 py-4 whitespace-nowrap">
                     <span
                       class="px-2 py-1 rounded-full text-xs font-medium"
-                      :class="
-                        getScoreColorClass(result.mean_rating, eventMaxScore)
-                      "
+                      :class="getScoreColorClass(result.mean_rating)"
                     >
-                      {{ Number(result.mean_rating || 0).toFixed(2) }}/{{
-                        eventMaxScore
-                      }}
+                      {{ Number(result.mean_rating || 0).toFixed(2) }}/100
                     </span>
                   </td>
                   <td class="px-3 py-4 whitespace-nowrap">
