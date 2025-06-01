@@ -345,8 +345,8 @@ const rankBySex = (candidates = [], useCorrectLogic = true) => {
 
 // Score color logic
 const getScoreColorClass = (score, maxScore = null) => {
-  // Always calculate percentage based on 100-point scale since we normalize scores
-  const percentage = (score / 100) * 100; // score is already normalized to 100-point scale
+  // Always calculate percentage based on 100-point scale since scores are normalized to 100
+  const percentage = (score / 100) * 100;
 
   if (percentage < 60)
     return isDarkMode.value
@@ -1424,7 +1424,7 @@ onUnmounted(() => {
                           Number(
                             result.mean_rating || result.raw_average || 0
                           ).toFixed(2)
-                        }}/{{ eventMaxScore }}
+                        }}/100
                       </span>
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap">
@@ -1517,7 +1517,7 @@ onUnmounted(() => {
                           Number(
                             result.mean_rating || result.raw_average || 0
                           ).toFixed(2)
-                        }}/{{ eventMaxScore }}
+                        }}/100
                       </span>
                     </td>
                     <td class="px-4 py-3 whitespace-nowrap">
