@@ -18,7 +18,3 @@ This is the frontend of the web-based pageant scoring and tabulation system for 
 - **Routing**: Vue Router
 - **Real-Time Updates**: Pusher
 - **PDF Support**: iframe or viewer plugins (for report preview)
-
-## License
-
-None
